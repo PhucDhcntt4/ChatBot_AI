@@ -1,0 +1,241 @@
+<!doctype html>
+<html lang="vi">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width,initial-scale=1" />
+    <title>Product Sync • Đông Hải</title>
+    <link rel="stylesheet" href="/static/css/product_admin.css" />
+  </head>
+  <body>
+    <header class="top">
+      <div class="wrap">
+        <div class="brand">ĐÔNG HẢI · PRODUCT ADMIN</div>
+        <h1>Đồng bộ danh mục sản phẩm</h1>
+        <p class="lead">
+          Lấy dữ liệu Shopify, tải ảnh, cập nhật PostgreSQL và tạo embedding
+          trong một quy trình duy nhất.
+        </p>
+      </div>
+    </header>
+    <main class="wrap content">
+      <div class="grid">
+        <section class="card">
+          <div class="card-title">
+            <div class="icon">⌘</div>
+            <h2>Nhập mã trực tiếp</h2>
+          </div>
+          <p class="help">
+            Mỗi SKU trên một dòng hoặc ngăn cách bằng dấu phẩy.
+          </p>
+          <textarea
+            id="skuText"
+            placeholder="FE04&#10;G81V6&#10;TM32"
+          ></textarea
+          ><button id="skuButton">Bắt đầu đồng bộ</button>
+        </section>
+        <section class="card">
+          <div class="card-title">
+            <div class="icon">⇧</div>
+            <h2>Nhập danh sách Excel</h2>
+          </div>
+          <p class="help">File .xlsx tối đa 5 MB, cột SKU hoặc Mã sản phẩm.</p>
+          <label class="drop"
+            ><div>
+              <div style="font-size: 30px">▤</div>
+              <b>Chọn file Excel</b><br /><span id="fileName" class="help"
+                >Chưa có file được chọn</span
+              ><input
+                id="excelFile"
+                type="file"
+                accept=".xlsx"
+                hidden
+              /></div></label
+          ><button id="excelButton">Tải file và đồng bộ</button>
+        </section>
+      </div>
+      <section class="card status-card" id="statusCard" hidden>
+        <div class="status-head">
+          <div class="status-copy">
+            <div class="spinner" id="statusIcon"></div>
+            <div>
+              <h2 id="statusTitle">Đang chuẩn bị…</h2>
+              <div class="help" id="phaseLabel">
+                Hệ thống đang khởi tạo tác vụ
+              </div>
+            </div>
+          </div>
+          <span class="badge" id="statusBadge">ĐANG CHẠY</span>
+        </div>
+        <div class="progress-label">
+          <span>Tiến độ toàn bộ</span><b id="progressText">0%</b>
+        </div>
+        <div class="bar"><div id="progress"></div></div>
+        <div class="steps">
+          <div class="step" data-phase="shopify"><span>1</span>Shopify</div>
+          <div class="step" data-phase="catalog"><span>2</span>Lưu catalog</div>
+          <div class="step" data-phase="images"><span>3</span>Tải ảnh</div>
+          <div class="step" data-phase="database"><span>4</span>PostgreSQL</div>
+          <div class="step" data-phase="embedding"><span>5</span>Embedding</div>
+        </div>
+        <div class="metrics">
+          <div class="metric">
+            <small>Tổng SKU</small><strong id="total">0</strong>
+          </div>
+          <div class="metric">
+            <small>Đã xử lý</small><strong id="processed">0</strong>
+          </div>
+          <div class="metric">
+            <small>Thành công</small
+            ><strong class="ok" id="succeeded">0</strong>
+          </div>
+          <div class="metric">
+            <small>Có lỗi</small><strong class="bad" id="failed">0</strong>
+          </div>
+        </div>
+        <details>
+          <summary>Nhật ký đồng bộ</summary>
+          <pre id="messages" aria-live="polite">Chưa có dữ liệu.</pre>
+        </details>
+        <div class="table-wrap">
+          <table>
+            <thead>
+              <tr>
+                <th>SKU</th>
+                <th>Trạng thái</th>
+                <th>Shopify Products</th>
+                <th>Ảnh mới</th>
+                <th>Chi tiết</th>
+              </tr>
+            </thead>
+            <tbody id="results">
+              <tr>
+                <td colspan="5" class="empty">
+                  <div class="empty-state">
+                    <div class="empty-icon">◷</div>
+                    <span>Kết quả sẽ hiển thị tại đây.</span>
+                  </div>
+                </td>
+              </tr>
+            </tbody>
+          </table>
+        </div>
+      </section>
+      <section class="card catalog-card">
+        <div class="catalog-head">
+          <div>
+            <div class="card-title">
+              <div class="icon">◉</div>
+              <h2>Sản phẩm đã đồng bộ AI</h2>
+            </div>
+            <div class="catalog-summary">
+              <span>Tổng: <b id="catalogTotal">0</b> sản phẩm</span
+              ><span>Model: <b id="catalogModel">—</b></span>
+            </div>
+          </div>
+          <div class="catalog-tools">
+            <input
+              id="catalogSearch"
+              placeholder="Tìm mã, tên hoặc loại sản phẩm"
+              aria-label="Tìm kiếm sản phẩm"
+            /><button class="small" id="catalogSearchButton">Tìm</button
+            ><button
+              class="small"
+              id="catalogRefreshButton"
+              title="Làm mới"
+              aria-label="Làm mới danh sách"
+            >
+              ↻
+            </button>
+          </div>
+        </div>
+        <div class="table-wrap">
+          <table>
+            <thead>
+              <tr>
+                <th>Mã</th>
+                <th>Sản phẩm</th>
+                <th>Màu</th>
+                <th>Variant</th>
+                <th>Ảnh local</th>
+                <th>Embedding</th>
+                <th>AI</th>
+                <th>Cập nhật</th>
+              </tr>
+            </thead>
+            <tbody id="catalogRows">
+              <tr>
+                <td colspan="8" class="empty">
+                  <div class="empty-state">
+                    <div class="empty-icon">◷</div>
+                    <span>Đang tải danh sách…</span>
+                  </div>
+                </td>
+              </tr>
+            </tbody>
+          </table>
+        </div>
+        <div class="pagination">
+          <button id="catalogPrev" aria-label="Trang trước">
+            ← Trang trước</button
+          ><span class="page-info"
+            >Trang <b id="catalogPage">1</b> / <b id="catalogPages">1</b></span
+          ><button id="catalogNext" aria-label="Trang sau">Trang sau →</button>
+        </div>
+      </section>
+    </main>
+    <div class="toast-stack" id="toastStack" aria-live="polite"></div>
+
+    <button class="ck-launcher" id="chatLauncher" aria-expanded="false">
+      <img src="/static/assets/logo.jpg" alt="" />
+      <span>Chat ngay</span>
+    </button>
+    <section
+      class="ck-panel"
+      id="chatPanel"
+      role="dialog"
+      aria-label="Trợ lý đồng bộ Đông Hải"
+      aria-hidden="true"
+    >
+      <div class="ck-head">
+        <img src="/static/assets/logo.jpg" alt="Đông Hải" />
+        <h3>Chat với đội ngũ hỗ trợ<br />của chúng tôi</h3>
+      </div>
+      <div class="ck-body" id="chatBody">
+        <div class="ck-msg bot">👋 Xin chào anh/chị! Em là trợ lý AI của Đông Hải. Anh/chị cần em hỗ trợ gì ạ?</div>
+      </div>
+      <div class="ck-foot">
+        <div class="ck-input-row">
+          <button
+            class="ck-attach"
+            id="chatAttach"
+            type="button"
+            aria-label="Gửi ảnh sản phẩm"
+            title="Gửi ảnh sản phẩm"
+          >
+            📷
+          </button>
+          <input
+            id="chatImage"
+            type="file"
+            accept="image/jpeg,image/png,image/webp"
+            hidden
+          />
+          <textarea
+            id="chatInput"
+            placeholder="Tin nhắn…"
+            rows="1"
+            aria-label="Nhập câu hỏi cho trợ lý"
+          ></textarea>
+          <button class="ck-send" id="chatSend" type="button" aria-label="Gửi">
+            <svg viewBox="0 0 24 24" aria-hidden="true" focusable="false">
+              <path d="M3.7 4.35a1 1 0 0 1 1.08-.16l15.1 6.9a1 1 0 0 1 0 1.82l-15.1 6.9a1 1 0 0 1-1.38-1.08L4.75 13 12.5 12 4.75 11 3.4 5.27a1 1 0 0 1 .3-.92Z" />
+            </svg>
+          </button>
+        </div>
+      </div>
+      <div class="ck-powered">Được phát triển bởi <b>Đông Hải</b></div>
+    </section>
+    <button class="ck-close" id="chatClose" aria-label="Đóng trợ lý">✕</button>
+    <script src="/static/js/product_admin.js" defer></script>
+  </body>
+</html>

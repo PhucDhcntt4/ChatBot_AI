@@ -1,0 +1,83 @@
+<!doctype html>
+<html lang="vi">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <meta name="description" content="Trợ lý tư vấn sản phẩm Đông Hải" />
+    <title>Đông Hải AI</title>
+    <link rel="stylesheet" href="/static/css/chat.css" />
+  </head>
+  <body>
+    <main class="page-shell">
+      <section class="intro">
+        <img src="/static/assets/logo.jpg" alt="Đông Hải" class="brand-logo" />
+        <span class="eyebrow">ĐÔNG HẢI AI</span>
+        <h1>Tư vấn sản phẩm dễ dàng hơn</h1>
+        <p>
+          Hỏi giá, màu, size, chất liệu, xem ảnh hoặc nhận gợi ý sản phẩm
+          phù hợp từ danh mục đã đồng bộ.
+        </p>
+        <div class="capabilities" aria-label="Khả năng của trợ lý">
+          <span>Thông tin sản phẩm</span>
+          <span>Ảnh theo màu</span>
+          <span>Gợi ý cùng loại</span>
+          <span>Chính sách mua hàng</span>
+        </div>
+      </section>
+
+      <section class="chat-card" aria-label="Chat với trợ lý Đông Hải">
+        <header class="chat-head">
+          <img src="/static/assets/logo_only.jpg" alt="" />
+          <div>
+            <h2>Trợ lý Đông Hải</h2>
+            <p><span class="online-dot"></span> Đang trực tuyến</p>
+          </div>
+          <button id="resetButton" class="reset-button" type="button">
+            Hội thoại mới
+          </button>
+        </header>
+
+        <div class="messages" id="messages" aria-live="polite">
+          <article class="message bot">
+            <div class="bubble">
+              👋 Xin chào anh/chị! Em có thể tư vấn sản phẩm, kiểm tra thông
+              tin màu, size, chất liệu, gửi ảnh và giải đáp chính sách mua
+              hàng. Anh/chị cần em hỗ trợ gì ạ?
+            </div>
+          </article>
+        </div>
+
+        <div class="suggestions" id="suggestions">
+          <button type="button">Tư vấn 3 mẫu giày thể thao</button>
+          <button type="button">Shop có túi xách nào?</button>
+          <button type="button">Chính sách đổi size thế nào?</button>
+        </div>
+
+        <form class="composer" id="chatForm">
+          <button class="attach-button" id="attachButton" type="button" aria-label="Gửi ảnh">
+            📷
+          </button>
+          <input id="imageInput" type="file" accept="image/jpeg,image/png,image/webp" hidden />
+          <textarea
+            id="messageInput"
+            rows="1"
+            maxlength="1000"
+            placeholder="Nhập câu hỏi của anh/chị..."
+            aria-label="Tin nhắn"
+            required
+          ></textarea>
+          <button id="sendButton" type="submit" aria-label="Gửi tin nhắn">
+            <svg viewBox="0 0 24 24" aria-hidden="true">
+              <path d="M3.4 20.4 21.7 12 3.4 3.6 3 10.2l12 1.8-12 1.8.4 6.6Z" />
+            </svg>
+          </button>
+        </form>
+        <footer>
+          <span id="connectionStatus">Sẵn sàng</span>
+          <span>Được phát triển bởi <b>Đông Hải AI</b></span>
+        </footer>
+      </section>
+    </main>
+    <script src="/static/js/chat.js" defer></script>
+  </body>
+</html>

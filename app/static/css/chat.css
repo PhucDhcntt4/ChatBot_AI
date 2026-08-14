@@ -1,0 +1,111 @@
+:root {
+  color-scheme: light;
+  --red: #a90f27;
+  --red-dark: #80091d;
+  --ink: #271b1d;
+  --muted: #76686a;
+  --line: #eadfe1;
+  --cream: #f8f4f1;
+  --white: #fff;
+  font-family: Inter, "Segoe UI", Arial, sans-serif;
+}
+
+* { box-sizing: border-box; }
+
+body {
+  margin: 0;
+  min-height: 100vh;
+  color: var(--ink);
+  background:
+    radial-gradient(circle at 7% 12%, rgba(169, 15, 39, .12), transparent 26%),
+    radial-gradient(circle at 89% 84%, rgba(169, 15, 39, .08), transparent 27%),
+    var(--cream);
+}
+
+button, textarea { font: inherit; }
+
+.page-shell {
+  width: min(1180px, calc(100% - 32px));
+  min-height: 100vh;
+  margin: 0 auto;
+  display: grid;
+  grid-template-columns: minmax(280px, .85fr) minmax(440px, 1.15fr);
+  align-items: center;
+  gap: clamp(30px, 7vw, 88px);
+  padding: 36px 0;
+}
+
+.intro { max-width: 510px; }
+.brand-logo { width: 150px; height: 58px; object-fit: contain; object-position: left; }
+.eyebrow { display: block; margin-top: 28px; color: var(--red); font-size: 13px; font-weight: 800; letter-spacing: .16em; }
+.intro h1 { margin: 13px 0 18px; font-size: clamp(38px, 5vw, 64px); line-height: 1.02; letter-spacing: -.045em; }
+.intro p { margin: 0; color: var(--muted); font-size: 18px; line-height: 1.65; }
+.capabilities { display: flex; flex-wrap: wrap; gap: 10px; margin-top: 28px; }
+.capabilities span { padding: 10px 14px; border: 1px solid #e5d5d8; border-radius: 999px; background: rgba(255,255,255,.68); font-size: 13px; font-weight: 650; }
+
+.chat-card {
+  height: min(820px, calc(100vh - 54px));
+  min-height: 600px;
+  display: grid;
+  grid-template-rows: auto 1fr auto auto auto;
+  overflow: hidden;
+  border: 1px solid rgba(255,255,255,.8);
+  border-radius: 30px;
+  background: rgba(255,255,255,.92);
+  box-shadow: 0 24px 70px rgba(62, 26, 32, .17);
+  backdrop-filter: blur(16px);
+}
+
+.chat-head { display: flex; align-items: center; gap: 13px; padding: 20px 22px; border-bottom: 1px solid var(--line); }
+.chat-head img { width: 48px; height: 48px; border-radius: 50%; object-fit: cover; box-shadow: 0 8px 20px rgba(169,15,39,.16); }
+.chat-head h2 { margin: 0; font-size: 18px; }
+.chat-head p { margin: 5px 0 0; color: var(--muted); font-size: 12px; }
+.online-dot { display: inline-block; width: 8px; height: 8px; margin-right: 4px; border-radius: 50%; background: #24a766; }
+.reset-button { margin-left: auto; padding: 9px 12px; border: 1px solid var(--line); border-radius: 12px; color: var(--red); background: #fff; cursor: pointer; font-size: 12px; font-weight: 700; }
+
+.messages { overflow-y: auto; padding: 24px 20px 12px; scroll-behavior: smooth; }
+.message { display: flex; margin-bottom: 15px; }
+.message.user { justify-content: flex-end; }
+.bubble { max-width: 84%; padding: 13px 16px; border-radius: 8px 18px 18px; background: #f4eeee; line-height: 1.55; white-space: pre-wrap; overflow-wrap: anywhere; }
+.message.user .bubble { color: #fff; border-radius: 18px 8px 18px 18px; background: linear-gradient(135deg, var(--red), var(--red-dark)); }
+.message.error .bubble { color: #871324; background: #ffe8eb; }
+
+.album { max-width: 84%; display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 5px; margin: -6px 0 16px; overflow: hidden; border-radius: 18px; background: #eee; }
+.album img { display: block; width: 100%; height: 160px; object-fit: cover; background: #f1eeee; }
+.album img:first-child:nth-last-child(1) { grid-column: 1 / -1; height: 330px; }
+.album-label { grid-column: 1 / -1; padding: 9px 12px; color: #fff; background: #392b2d; font-size: 12px; }
+
+.typing .bubble { display: flex; gap: 5px; align-items: center; min-height: 42px; }
+.typing i { width: 7px; height: 7px; border-radius: 50%; background: #a99599; animation: pulse 1s infinite alternate; }
+.typing i:nth-child(2) { animation-delay: .2s; }
+.typing i:nth-child(3) { animation-delay: .4s; }
+@keyframes pulse { to { opacity: .25; transform: translateY(-3px); } }
+
+.suggestions { display: flex; gap: 8px; overflow-x: auto; padding: 8px 20px 13px; scrollbar-width: none; }
+.suggestions button { flex: 0 0 auto; padding: 9px 12px; border: 1px solid var(--line); border-radius: 999px; color: var(--red-dark); background: #fff; cursor: pointer; font-size: 12px; font-weight: 650; }
+
+.composer { display: flex; align-items: flex-end; gap: 10px; margin: 0 18px; padding: 8px 8px 8px 16px; border: 1px solid #e4d8da; border-radius: 24px; background: #fff; box-shadow: 0 8px 24px rgba(66,29,35,.08); }
+.composer:focus-within { border-color: rgba(169,15,39,.42); box-shadow: 0 0 0 4px rgba(169,15,39,.08); }
+.composer textarea { width: 100%; max-height: 110px; resize: none; border: 0; outline: 0; padding: 9px 0; color: var(--ink); background: transparent; line-height: 1.45; }
+.composer #sendButton { position: relative; flex: 0 0 48px; width: 48px; height: 48px; border: 0; border-radius: 50%; color: #fff; background: var(--red); cursor: pointer; box-shadow: 0 8px 18px rgba(169,15,39,.27); }
+.composer #sendButton:disabled { cursor: wait; opacity: .55; }
+.composer #sendButton svg { position: absolute; top: 50%; left: 50%; width: 21px; height: 21px; transform: translate(-50%, -50%); fill: currentColor; }
+.composer .attach-button { flex: 0 0 38px; width: 38px; height: 38px; margin-bottom: 5px; border: 0; border-radius: 50%; color: var(--red); background: #f7ecee; cursor: pointer; }
+.user-preview { justify-content: flex-end; }
+.user-preview img { display: block; width: min(260px, 70%); max-height: 300px; object-fit: cover; border-radius: 18px 8px 18px 18px; }
+.chat-card footer { display: flex; justify-content: space-between; gap: 12px; padding: 13px 22px 17px; color: #9a898c; font-size: 10px; }
+
+@media (max-width: 850px) {
+  .page-shell { grid-template-columns: 1fr; width: min(650px, calc(100% - 20px)); padding: 22px 0; }
+  .intro { display: none; }
+  .chat-card { height: calc(100vh - 44px); min-height: 560px; }
+}
+
+@media (max-width: 480px) {
+  .page-shell { width: 100%; padding: 0; }
+  .chat-card { height: 100vh; min-height: 100vh; border: 0; border-radius: 0; }
+  .reset-button { font-size: 0; }
+  .reset-button::after { content: "Mới"; font-size: 12px; }
+  .bubble, .album { max-width: 92%; }
+  .album img { height: 130px; }
+}
