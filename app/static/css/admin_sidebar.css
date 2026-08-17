@@ -1,0 +1,78 @@
+.admin-sidebar {
+  position: fixed;
+  inset: 0 auto 0 0;
+  z-index: 30;
+  width: 210px;
+  padding: 26px 16px;
+  box-sizing: border-box;
+  color: #fff;
+  background:
+    radial-gradient(circle at 15% 92%, rgba(255,255,255,.09), transparent 190px),
+    linear-gradient(180deg, #850d20, #ae1029 56%, #720918);
+  box-shadow: 10px 0 30px rgba(65, 4, 15, 0.14);
+}
+.admin-sidebar-brand {
+  display: flex;
+  align-items: center;
+  gap: 11px;
+  margin: 0 6px 30px;
+  color: #fff;
+  font-weight: 800;
+  text-decoration: none;
+  letter-spacing: 0.02em;
+}
+.admin-sidebar-brand img {
+  width: 44px;
+  height: 44px;
+  border-radius: 50%;
+  object-fit: cover;
+  background: #fff;
+}
+.admin-sidebar nav { display: grid; gap: 8px; }
+.admin-sidebar nav a {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  min-height: 48px;
+  padding: 12px 14px;
+  border-radius: 12px;
+  color: rgba(255,255,255,.82);
+  font-weight: 650;
+  text-decoration: none;
+  border: 1px solid transparent;
+  transition: .18s ease;
+}
+.admin-sidebar nav a:hover,
+.admin-sidebar nav a.active {
+  color: #970e23;
+  background: #fff;
+  box-shadow: 0 8px 20px rgba(50,0,8,.18);
+}
+.admin-sidebar nav a:not(.active):hover {
+  color: #fff;
+  border-color: rgba(255,255,255,.18);
+  background: rgba(255,255,255,.09);
+  box-shadow: none;
+}
+.admin-sidebar nav a span { width: 20px; text-align: center; font-size: 18px; }
+body.has-admin-sidebar > .top,
+body.has-admin-sidebar > main { margin-left: 210px; }
+@media (max-width: 760px) {
+  .admin-sidebar {
+    position: sticky;
+    top: 0;
+    width: 100%;
+    height: auto;
+    padding: 8px 12px;
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+  }
+  .admin-sidebar-brand { margin: 0; }
+  .admin-sidebar-brand img { width: 36px; height: 36px; }
+  .admin-sidebar-brand span { display: none; }
+  .admin-sidebar nav { display: flex; gap: 4px; }
+  .admin-sidebar nav a { padding: 9px 10px; font-size: 12px; gap: 5px; }
+  body.has-admin-sidebar > .top,
+  body.has-admin-sidebar > main { margin-left: 0; }
+}

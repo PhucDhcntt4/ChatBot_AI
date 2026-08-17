@@ -53,11 +53,10 @@ class WebTests(unittest.TestCase):
         app.state.image_conversation_service = FakeImageConversationService()
         self.client = TestClient(app)
 
-    def test_home_page_is_utf8_and_uses_v2_script(self):
-        response = self.client.get("/")
-        self.assertEqual(response.status_code, 200)
-        self.assertIn("Trợ lý Đông Hải", response.text)
-        self.assertIn("/static/js/chat.js", response.text)
+    def test_home_page_redirects_to_combined_admin_chat_page(self):
+        response = self.client.get("/", follow_redirects=False)
+        self.assertEqual(response.status_code, 307)
+        self.assertEqual(response.headers["location"], "/admin/products")
 
     def test_chat_contract_contains_media(self):
         response = self.client.post(

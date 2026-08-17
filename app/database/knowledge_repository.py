@@ -7,6 +7,23 @@ from app.database.connection import database_connection
 
 
 class KnowledgeRepository:
+    def list_documents(self) -> list[dict[str, Any]]:
+        with database_connection() as connection:
+            rows = connection.execute(
+                """
+                SELECT kd.id, kd.source_key, kd.title, kd.category,
+                       kd.embedding_provider, kd.embedding_model,
+                       kd.embedding_dimension, kd.is_active,
+                       kd.created_at, kd.updated_at,
+                       COUNT(kc.id) AS chunk_count
+                FROM knowledge_documents kd
+                LEFT JOIN knowledge_chunks kc ON kc.document_id = kd.id
+                GROUP BY kd.id
+                ORDER BY kd.updated_at DESC, kd.title
+                """
+            ).fetchall()
+        return [dict(row) for row in rows]
+
     def document_state(self, source_key: str) -> dict[str, Any] | None:
         with database_connection() as connection:
             row = connection.execute(
@@ -19,6 +36,59 @@ class KnowledgeRepository:
                 (source_key,),
             ).fetchone()
         return dict(row) if row else None
+
+    def delete_document(self, document_id: int) -> dict[str, Any] | None:
+        """Delete a knowledge document and every embedding chunk it owns."""
+        with database_connection() as connection:
+            row = connection.execute(
+                """
+                SELECT id, source_key, title, category
+                FROM knowledge_documents
+                WHERE id = %s
+                FOR UPDATE
+                """,
+                (document_id,),
+            ).fetchone()
+            if not row:
+                return None
+            connection.execute(
+                "DELETE FROM knowledge_chunks WHERE document_id = %s",
+                (document_id,),
+            )
+            connection.execute(
+                "DELETE FROM knowledge_documents WHERE id = %s",
+                (document_id,),
+            )
+        return dict(row)
+
+    def get_document(self, document_id: int) -> dict[str, Any] | None:
+        """Return one document together with its ordered text chunks."""
+        with database_connection() as connection:
+            document = connection.execute(
+                """
+                SELECT id, source_key, title, category, source_checksum,
+                       embedding_provider, embedding_model,
+                       embedding_dimension, metadata, is_active,
+                       created_at, updated_at
+                FROM knowledge_documents
+                WHERE id = %s
+                """,
+                (document_id,),
+            ).fetchone()
+            if not document:
+                return None
+            chunks = connection.execute(
+                """
+                SELECT id, chunk_index, heading, content, content_checksum
+                FROM knowledge_chunks
+                WHERE document_id = %s
+                ORDER BY chunk_index
+                """,
+                (document_id,),
+            ).fetchall()
+        result = dict(document)
+        result["chunks"] = [dict(chunk) for chunk in chunks]
+        return result
 
     def replace_document(
         self,

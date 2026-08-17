@@ -19,10 +19,13 @@ from app.product_recognition.models import (
 from app.services.product_image_store import (
     ProductImageStore,
 )
-
+from app.config import (
+    VECTOR_REFERENCES_PER_PRODUCT as REFERENCE_IMAGE_LIMIT,
+)
 
 class ProductRecognitionService:
-    VECTOR_REFERENCES_PER_PRODUCT = 4
+    VECTOR_REFERENCES_PER_PRODUCT = REFERENCE_IMAGE_LIMIT
+    AI_IMAGE_MAX_SIDE = 1024
 
     def __init__(
         self,
@@ -39,6 +42,28 @@ class ProductRecognitionService:
         self._image_cache: dict[str, tuple[bytes, str]] = {}
         self._cache_lock = threading.Lock()
         self.image_store = ProductImageStore()
+
+    @classmethod
+    def _prepare_ai_image(
+        cls,
+        image_bytes: bytes,
+    ) -> tuple[bytes, str]:
+        """Resize a copy for Gemini without changing local catalog images."""
+
+        with Image.open(BytesIO(image_bytes)) as image:
+            image = image.convert("RGB")
+            image.thumbnail(
+                (cls.AI_IMAGE_MAX_SIDE, cls.AI_IMAGE_MAX_SIDE),
+                Image.Resampling.LANCZOS,
+            )
+            output = BytesIO()
+            image.save(
+                output,
+                format="JPEG",
+                quality=88,
+                optimize=True,
+            )
+        return output.getvalue(), "image/jpeg"
 
     @staticmethod
     def _difference_hash(image_bytes: bytes) -> int | None:
@@ -276,6 +301,10 @@ class ProductRecognitionService:
         if not allowed_codes:
             return VectorCandidateVerification()
 
+        customer_bytes, customer_mime = self._prepare_ai_image(
+            image_bytes
+        )
+
         contents: list = [
             (
                 "Hãy xác minh CUSTOMER IMAGE với các sản phẩm "
@@ -298,15 +327,21 @@ class ProductRecognitionService:
                 f"{sorted(allowed_codes)}."
             ),
             "CUSTOMER CROPPED IMAGE:",
-            types.Part.from_bytes(data=image_bytes, mime_type=mime_type),
+            types.Part.from_bytes(
+                data=customer_bytes,
+                mime_type=customer_mime,
+            ),
         ]
 
         if original_image_bytes:
+            prepared_original_bytes, prepared_original_mime = (
+                self._prepare_ai_image(original_image_bytes)
+            )
             contents.extend([
                 "CUSTOMER ORIGINAL IMAGE:",
                 types.Part.from_bytes(
-                    data=original_image_bytes,
-                    mime_type=original_mime_type or mime_type,
+                    data=prepared_original_bytes,
+                    mime_type=prepared_original_mime,
                 ),
             ])
 
@@ -396,6 +431,9 @@ class ProductRecognitionService:
                     distance = (original_hash ^ reference_hash).bit_count()
                     if near_duplicate is None or distance < near_duplicate[0]:
                         near_duplicate = (distance, code)
+            prepared_reference_bytes, prepared_reference_mime = (
+                self._prepare_ai_image(reference_bytes)
+            )
             loaded_per_code[code] = loaded_per_code.get(code, 0) + 1
             contents.extend([
                 (
@@ -405,8 +443,8 @@ class ProductRecognitionService:
                     f"reference={loaded_per_code[code]}"
                 ),
                 types.Part.from_bytes(
-                    data=reference_bytes,
-                    mime_type=reference_mime,
+                    data=prepared_reference_bytes,
+                    mime_type=prepared_reference_mime,
                 ),
             ])
 

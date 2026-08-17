@@ -3,6 +3,10 @@ let timer = null,
   lastStatus = "",
   catalogPage = 1,
   catalogPages = 1;
+let lightboxUrls = [],
+  lightboxIndex = 0,
+  lightboxProductName = "",
+  lightboxPreviousFocus = null;
 const catalogPageSize = 20,
   phases = ["shopify", "catalog", "images", "database", "embedding"];
 function setBusy(v) {
@@ -291,8 +295,21 @@ function chatClose() {
 $("chatLauncher").onclick = chatOpen;
 $("chatClose").onclick = chatClose;
 document.addEventListener("keydown", (e) => {
-  if (e.key === "Escape" && $("chatPanel").classList.contains("open"))
+  if (e.key === "Escape" && !$("imageLightbox").hidden) {
+    closeLightbox();
+    return;
+  }
+  if (e.key === "ArrowLeft" && !$("imageLightbox").hidden) {
+    showLightboxImage(lightboxIndex - 1);
+    return;
+  }
+  if (e.key === "ArrowRight" && !$("imageLightbox").hidden) {
+    showLightboxImage(lightboxIndex + 1);
+    return;
+  }
+  if (e.key === "Escape" && $("chatPanel").classList.contains("open")) {
     chatClose();
+  }
 });
 $("chatInput").addEventListener("input", function () {
   this.style.height = "40px";
@@ -332,17 +349,75 @@ function addUserImage(file) {
   $("chatBody").appendChild(wrapper);
   $("chatBody").scrollTop = $("chatBody").scrollHeight;
 }
+function showLightboxImage(index) {
+  if (!lightboxUrls.length) return;
+  lightboxIndex = (index + lightboxUrls.length) % lightboxUrls.length;
+  const image = $("lightboxImage");
+  image.src = lightboxUrls[lightboxIndex];
+  image.alt = `${lightboxProductName}, ảnh ${lightboxIndex + 1}`;
+  $("lightboxCaption").textContent =
+    `${lightboxProductName} · ${lightboxIndex + 1}/${lightboxUrls.length}`;
+  const hasMultipleImages = lightboxUrls.length > 1;
+  $("lightboxPrev").hidden = !hasMultipleImages;
+  $("lightboxNext").hidden = !hasMultipleImages;
+}
+function openLightbox(urls, index, productName) {
+  lightboxUrls = [...urls];
+  lightboxProductName = productName || "Sản phẩm";
+  lightboxPreviousFocus = document.activeElement;
+  showLightboxImage(index);
+  $("imageLightbox").hidden = false;
+  document.body.classList.add("lightbox-open");
+  $("lightboxClose").focus();
+}
+function closeLightbox() {
+  $("imageLightbox").hidden = true;
+  $("lightboxImage").removeAttribute("src");
+  document.body.classList.remove("lightbox-open");
+  lightboxUrls = [];
+  if (lightboxPreviousFocus instanceof HTMLElement) {
+    lightboxPreviousFocus.focus();
+  }
+}
+$("lightboxClose").onclick = closeLightbox;
+$("lightboxPrev").onclick = () => showLightboxImage(lightboxIndex - 1);
+$("lightboxNext").onclick = () => showLightboxImage(lightboxIndex + 1);
+$("imageLightbox").onclick = (event) => {
+  if (event.target === $("imageLightbox")) closeLightbox();
+};
+$("chatBody").addEventListener("click", (event) => {
+  const image = event.target.closest(".ck-product-album img");
+  if (!image) return;
+  const album = image.closest(".ck-product-album");
+  const images = [...album.querySelectorAll("img")];
+  const urls = images.map((item) => item.currentSrc || item.src);
+  const index = images.indexOf(image);
+  const productName = image.alt.replace(/, ảnh \d+$/, "") || "Sản phẩm";
+  openLightbox(urls, index, productName);
+});
 function addProductAlbums(products) {
   (products || []).forEach((product) => {
     const urls = (product.image_urls || []).slice(0, 4);
     if (!urls.length) return;
     const album = document.createElement("div");
     album.className = `ck-product-album count-${urls.length}${urls.length === 1 ? " single" : ""}`;
-    urls.forEach((url) => {
+    const productName =
+      product.product_name || product.product_code || "Sản phẩm";
+    urls.forEach((url, imageIndex) => {
       const image = document.createElement("img");
       image.src = url;
       image.alt = `${product.product_name || product.product_code || "Sản phẩm"}`;
       image.loading = "lazy";
+      image.alt = `${productName}, ảnh ${imageIndex + 1}`;
+      image.tabIndex = 0;
+      image.setAttribute("role", "button");
+      image.setAttribute("aria-label", `Xem lớn ${image.alt}`);
+      image.onkeydown = (event) => {
+        if (event.key === "Enter" || event.key === " ") {
+          event.preventDefault();
+          openLightbox(urls, imageIndex, productName);
+        }
+      };
       image.onload = () => {
         $("chatBody").scrollTop = $("chatBody").scrollHeight;
       };

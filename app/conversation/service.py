@@ -6,6 +6,7 @@ from app.conversation.context import (
     ConversationContextStore,
     conversation_context_store,
 )
+from app.conversation.cta import CTAService
 from app.conversation.executor import ConversationExecutor
 from app.conversation.models import ConversationResponse
 from app.conversation.planner import ConversationPlanner
@@ -26,6 +27,7 @@ class ConversationService:
         self.planner = ConversationPlanner(ai)
         self.executor = executor or ConversationExecutor()
         self.presenter = ConversationPresenter(ai)
+        self.cta = CTAService()
         self.context_store = context_store or conversation_context_store
 
     def chat(
@@ -45,13 +47,15 @@ class ConversationService:
 
         execution_started = perf_counter()
         result = self.executor.execute(message, plan, context)
+        self.cta.apply(plan, result, context)
         execution_seconds = perf_counter() - execution_started
         logger.info(
-            "V2 EXECUTE session=%s status=%s products=%s media=%s sources=%s time=%.3fs",
+            "V2 EXECUTE session=%s status=%s products=%s media=%s "
+            "sources=%s cta=%s time=%.3fs",
             session_id, result.status,
             [item.get("product_code") for item in result.products],
             [{"code": item.product_code, "color": item.color, "images": len(item.image_urls)} for item in result.media],
-            len(result.sources), execution_seconds,
+            len(result.sources), result.cta_type.value, execution_seconds,
         )
 
         presentation_started = perf_counter()
@@ -70,6 +74,7 @@ class ConversationService:
             context.recently_recommended_codes = [
                 product["product_code"] for product in result.products
             ]
+        self.cta.record(context, result)
         self.context_store.append(context, "user", message)
         self.context_store.append(context, "assistant", reply)
         self.context_store.save(context)
@@ -81,6 +86,8 @@ class ConversationService:
             products=result.products,
             media=result.media,
             sources=result.sources,
+            cta_type=result.cta_type,
+            cta_text=result.cta_text,
             provider=self.ai.provider_name,
             model=self.ai.model,
             timing={

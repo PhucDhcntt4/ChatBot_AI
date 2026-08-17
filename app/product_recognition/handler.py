@@ -8,6 +8,7 @@ from google.genai import types # type: ignore
 from app.config import (
     PRODUCT_REPLY_PROMPT_PATH,
     PRODUCT_VECTOR_SEARCH_ENABLED,
+    VECTOR_AUTO_ACCEPT_SIMILARITY,
     VECTOR_MIN_MARGIN,
     VECTOR_SEARCH_LIMIT,
 )
@@ -173,9 +174,28 @@ class ProductImageHandler:
         if decision.status == "no_match":
             return []
 
+        strong_vector_match = (
+            decision.top_similarity >= VECTOR_AUTO_ACCEPT_SIMILARITY
+            and decision.margin >= VECTOR_MIN_MARGIN
+        )
+
+        candidates_for_verification = (
+            [decision.best_candidate]
+            if strong_vector_match and decision.best_candidate
+            else verification_candidates
+        )
+
         candidate_codes = [
-            item["product_code"] for item in verification_candidates
+            item["product_code"]
+            for item in candidates_for_verification
         ]
+        logger.info(
+            "VECTOR VERIFICATION MODE mode=%s codes=%s "
+            "references_per_product=%s",
+            "top_only" if strong_vector_match else "shortlist",
+            candidate_codes,
+            self.recognition.VECTOR_REFERENCES_PER_PRODUCT,
+        )
         verification = self.recognition.verify_vector_candidates(
             image_bytes=image_bytes,
             mime_type=mime_type,

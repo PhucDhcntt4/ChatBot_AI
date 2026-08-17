@@ -3,7 +3,7 @@ import logging
 from pathlib import Path
 
 from fastapi import FastAPI, File, Form, HTTPException, Request, UploadFile
-from fastapi.responses import FileResponse
+from fastapi.responses import RedirectResponse
 from fastapi.staticfiles import StaticFiles
 
 from app.ai.factory import create_ai_provider
@@ -15,6 +15,8 @@ from app.conversation.models import ChatRequest, ConversationResponse, ResetRequ
 from app.conversation.service import ConversationService
 from app.database.product_repository import ProductRepository
 from app.routes.admin_product_router import router as admin_product_router
+from app.routes.admin_knowledge_router import router as admin_knowledge_router
+from app.routes.admin_prompt_router import router as admin_prompt_router
 
 
 logger = logging.getLogger("uvicorn.error")
@@ -59,12 +61,14 @@ app = FastAPI(
     lifespan=lifespan,
 )
 app.include_router(admin_product_router)
+app.include_router(admin_knowledge_router)
+app.include_router(admin_prompt_router)
 app.mount("/static", StaticFiles(directory=STATIC_DIR), name="static")
 
 
 @app.get("/", include_in_schema=False)
 def web_chat():
-    return FileResponse(STATIC_DIR / "index.html")
+    return RedirectResponse(url="/admin/products", status_code=307)
 
 
 @app.get("/health")

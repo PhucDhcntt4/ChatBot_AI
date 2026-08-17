@@ -6,6 +6,7 @@ from google import genai
 
 from app.config import GEMINI_MODEL, PRODUCT_ALBUM_IMAGE_LIMIT
 from app.conversation.context import ConversationContextStore
+from app.conversation.cta import CTAService
 from app.conversation.models import (
     ConversationIntent,
     ConversationPlan,
@@ -50,6 +51,7 @@ class ProductImageConversationService:
             client=self.client, model=self.model, catalog=self.catalog
         )
         self.presenter = ConversationPresenter(ai)
+        self.cta = CTAService()
 
     def recognize(
         self,
@@ -85,9 +87,15 @@ class ProductImageConversationService:
         handled = self.handler.handle(
             image_bytes=recognition_bytes,
             mime_type=recognition_mime,
-            product_type=str(classification.get("product_type") or "unknown"),
-            original_image_bytes=image_bytes,
-            original_mime_type=mime_type,
+            product_type=str(
+                classification.get("product_type") or "unknown"
+            ),
+            original_image_bytes=(
+                image_bytes if crop_applied else None
+            ),
+            original_mime_type=(
+                mime_type if crop_applied else None
+            ),
         )
         recognition_seconds = perf_counter() - recognition_started
         codes = list(dict.fromkeys(
@@ -120,8 +128,10 @@ class ProductImageConversationService:
             facts={
                 "classified_product_type": classification.get("product_type"),
                 "crop_applied": crop_applied,
+                "origin": "image_recognition",
             },
         )
+        self.cta.apply(plan, result, context)
         presentation_started = perf_counter()
         if products:
             reply = self.presenter.present(caption or "Nhận diện sản phẩm", plan, result, context)
@@ -130,21 +140,29 @@ class ProductImageConversationService:
                 "Dạ, em chưa tìm thấy sản phẩm khớp với hình ảnh này trong hệ thống. "
                 "Anh/chị gửi thêm mã sản phẩm hoặc một ảnh rõ hơn, chụp trọn sản phẩm giúp em nhé. 😊"
             )
+        reply = self.presenter.with_cta(reply, result)
         presentation_seconds = perf_counter() - presentation_started
 
         if products:
             context.latest_product_code = products[0]["product_code"]
+        self.cta.record(context, result)
         history_message = caption.strip() or "[Khách gửi ảnh sản phẩm]"
         self.context_store.append(context, "user", history_message)
         self.context_store.append(context, "assistant", reply)
         self.context_store.save(context)
 
         logger.info(
-            "WEB V2 IMAGE status=%s type=%s codes=%s crop=%s total=%.3fs",
+            "WEB V2 IMAGE status=%s type=%s codes=%s crop=%s cta=%s "
+            "classification=%.3fs recognition=%.3fs "
+            "presenter=%.3fs total=%.3fs",
             result.status,
             classification.get("product_type"),
             codes,
             crop_applied,
+            result.cta_type.value,
+            classify_seconds,
+            recognition_seconds,
+            presentation_seconds,
             perf_counter() - started,
         )
         return ConversationResponse(
@@ -153,6 +171,8 @@ class ProductImageConversationService:
             intent=result.intent,
             products=products,
             media=media,
+            cta_type=result.cta_type,
+            cta_text=result.cta_text,
             provider=self.ai.provider_name,
             model=self.ai.model,
             timing={

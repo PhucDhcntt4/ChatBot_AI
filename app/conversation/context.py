@@ -29,6 +29,7 @@ class ConversationContextStore:
 
     def save(self, context: ConversationContext) -> None:
         context.history = context.history[-HISTORY_LIMIT:]
+        context.cta_history = context.cta_history[-5:]
         with self._lock:
             self._items[self._key(context.channel, context.session_id)] = (
                 context.model_copy(deep=True)

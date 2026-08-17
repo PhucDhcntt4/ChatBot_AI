@@ -1,7 +1,7 @@
 from enum import Enum
 from typing import Any, Literal
 
-from pydantic import BaseModel, Field, field_validator
+from pydantic import BaseModel, Field, field_validator # type: ignore
 
 
 class ConversationIntent(str, Enum):
@@ -14,6 +14,17 @@ class ConversationIntent(str, Enum):
     UNKNOWN = "unknown"
 
 
+class CTAType(str, Enum):
+    NONE = "none"
+    ASK_SIZE = "ask_size"
+    CHOOSE_COLOR = "choose_color"
+    SIZE_SUPPORT = "size_support"
+    IMAGE_FEEDBACK = "image_feedback"
+    CHOOSE_PRODUCT = "choose_product"
+    START_ORDER = "start_order"
+    PROVIDE_MORE_INFO = "provide_more_info"
+
+
 class ConversationPlan(BaseModel):
     intent: ConversationIntent = ConversationIntent.UNKNOWN
     search_query: str | None = None
@@ -22,6 +33,7 @@ class ConversationPlan(BaseModel):
     requested_attributes: list[str] = Field(default_factory=list)
     requested_count: int = Field(default=3, ge=1, le=5)
     send_images: bool = False
+    buying_intent: bool = False
     relation: Literal["same_product_type"] | None = None
 
     @field_validator("reference_product_code")
@@ -41,6 +53,8 @@ class ConversationContext(BaseModel):
     channel: str
     latest_product_code: str | None = None
     recently_recommended_codes: list[str] = Field(default_factory=list)
+    last_cta_type: CTAType | None = None
+    cta_history: list[str] = Field(default_factory=list)
     history: list[HistoryItem] = Field(default_factory=list)
 
 
@@ -59,6 +73,8 @@ class ExecutionResult(BaseModel):
     knowledge_context: str = ""
     sources: list[dict[str, Any]] = Field(default_factory=list)
     facts: dict[str, Any] = Field(default_factory=dict)
+    cta_type: CTAType = CTAType.NONE
+    cta_text: str | None = None
 
 
 class ConversationResponse(BaseModel):
@@ -68,6 +84,8 @@ class ConversationResponse(BaseModel):
     products: list[dict[str, Any]] = Field(default_factory=list)
     media: list[ProductMedia] = Field(default_factory=list)
     sources: list[dict[str, Any]] = Field(default_factory=list)
+    cta_type: CTAType = CTAType.NONE
+    cta_text: str | None = None
     provider: str
     model: str
     timing: dict[str, float] = Field(default_factory=dict)

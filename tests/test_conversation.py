@@ -2,8 +2,10 @@ import unittest
 
 from app.ai.base import AIProvider
 from app.conversation.context import ConversationContextStore
+from app.conversation.cta import CTAService
 from app.conversation.executor import ConversationExecutor
 from app.conversation.models import (
+    CTAType,
     ConversationContext,
     ConversationIntent,
     ConversationPlan,
@@ -143,6 +145,43 @@ class ConversationTests(unittest.TestCase):
         )
         self.assertEqual(response.status, "knowledge_found")
         self.assertEqual(response.sources[0]["source_key"], "policy/test.txt")
+        self.assertEqual(response.cta_type, CTAType.NONE)
+        self.assertIsNone(response.cta_text)
+
+    def test_contextual_cta_does_not_repeat_recent_wording(self):
+        first = self.service.chat(
+            message="Tìm giày",
+            session_id="cta",
+            channel="web",
+        )
+        second = self.service.chat(
+            message="Tìm giày",
+            session_id="cta",
+            channel="web",
+        )
+        self.assertEqual(first.cta_type, CTAType.ASK_SIZE)
+        self.assertEqual(second.cta_type, CTAType.ASK_SIZE)
+        self.assertNotEqual(first.cta_text, second.cta_text)
+        self.assertTrue(first.message.endswith(first.cta_text))
+        self.assertTrue(second.message.endswith(second.cta_text))
+
+    def test_buying_intent_uses_start_order_cta(self):
+        policy = CTAService()
+        context = ConversationContext(session_id="buy", channel="web")
+        plan = ConversationPlan(
+            intent=ConversationIntent.PRODUCT_INFORMATION,
+            reference_product_code="G81V6",
+            buying_intent=True,
+        )
+        result = ExecutionResult(
+            success=True,
+            status="product_found",
+            intent=plan.intent,
+            products=[PRODUCT.copy()],
+        )
+        policy.apply(plan, result, context)
+        self.assertEqual(result.cta_type, CTAType.START_ORDER)
+        self.assertIsNotNone(result.cta_text)
 
 
 if __name__ == "__main__":

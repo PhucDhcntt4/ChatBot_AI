@@ -1,0 +1,233 @@
+<!doctype html>
+<html lang="vi">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width,initial-scale=1" />
+    <title>Knowledge · Đông Hải AI</title>
+    <link
+      rel="stylesheet"
+      href="/static/css/admin_sidebar.css?v=20260815-redesign2"
+    />
+    <link
+      rel="stylesheet"
+      href="/static/css/admin_pages.css?v=20260817-redesign4"
+    />
+  </head>
+  <body class="has-admin-sidebar">
+    <aside class="admin-sidebar">
+      <a class="admin-sidebar-brand" href="/admin/products"
+        ><img src="/static/assets/logo.jpg" alt="Đông Hải" /><span
+          >Đông Hải AI</span
+        ></a
+      >
+      <nav>
+        <a href="/admin/products"><span>◫</span>Sản phẩm</a
+        ><a class="active" href="/admin/knowledge"><span>▤</span>Knowledge</a
+        ><a href="/admin/prompts"><span>✎</span>Prompt</a>
+      </nav>
+    </aside>
+    <div class="admin-page">
+      <header class="page-head">
+        <h1>Quản lý Knowledge</h1>
+        <p>
+          Tải tài liệu, tạo embedding và theo dõi dữ liệu RAG trong PostgreSQL.
+        </p>
+      </header>
+      <main class="page-content">
+        <div class="grid-2">
+          <section class="card">
+            <h2>Thêm tài liệu</h2>
+            <p class="muted">
+              Hỗ trợ TXT, Markdown và PDF có văn bản; tối đa 10&nbsp;MB.
+            </p>
+            <form id="uploadForm">
+              <label for="knowledgeFile">Tài liệu</label>
+              <div class="upload-drop" id="dropZone">
+                <svg
+                  viewBox="0 0 24 24"
+                  fill="none"
+                  stroke="currentColor"
+                  stroke-width="1.8"
+                  stroke-linecap="round"
+                  stroke-linejoin="round"
+                >
+                  <path d="M12 16V4" />
+                  <path d="m7 9 5-5 5 5" />
+                  <path d="M4 16v3a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2v-3" />
+                </svg>
+                <div class="drop-title">
+                  Kéo thả tệp vào đây hoặc bấm để chọn
+                </div>
+                <div class="drop-hint">.txt · .md · .pdf — tối đa 10 MB</div>
+                <input
+                  id="knowledgeFile"
+                  type="file"
+                  accept=".txt,.md,.pdf"
+                  required
+                />
+              </div>
+              <div class="file-chip" id="fileChip">
+                <svg
+                  viewBox="0 0 24 24"
+                  fill="none"
+                  stroke="currentColor"
+                  stroke-width="1.8"
+                  stroke-linecap="round"
+                  stroke-linejoin="round"
+                >
+                  <path
+                    d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"
+                  />
+                  <path d="M14 2v6h6" />
+                </svg>
+                <div class="info">
+                  <div class="name" id="fileChipName"></div>
+                  <div class="size" id="fileChipSize"></div>
+                </div>
+                <button
+                  class="clear-file"
+                  type="button"
+                  id="clearFile"
+                  title="Bỏ chọn tệp"
+                >
+                  <svg
+                    viewBox="0 0 24 24"
+                    fill="none"
+                    stroke="currentColor"
+                    stroke-width="2"
+                    stroke-linecap="round"
+                  >
+                    <path d="M18 6 6 18" />
+                    <path d="M6 6l12 12" />
+                  </svg>
+                </button>
+              </div>
+              <label for="knowledgeCategory">Nhóm tài liệu</label>
+              <input
+                id="knowledgeCategory"
+                list="categoryOptions"
+                value="customer_care"
+                pattern="[a-z0-9_-]+"
+                required
+              />
+              <datalist id="categoryOptions">
+                <option value="customer_care"></option>
+                <option value="product_info"></option>
+                <option value="shipping"></option>
+                <option value="return_policy"></option>
+                <option value="promotion"></option>
+                <option value="faq"></option>
+              </datalist>
+              <button
+                id="uploadButton"
+                type="submit"
+                style="width: 100%; margin-top: 18px"
+              >
+                Tải lên và tạo embedding
+              </button>
+            </form>
+            <div class="notice" id="jobNotice"></div>
+            <div class="steps" id="jobSteps" hidden>
+              <div class="step" data-step="upload">
+                <div class="dot">1</div>
+                <div class="label">Tải lên</div>
+              </div>
+              <div class="step" data-step="embedding">
+                <div class="dot">2</div>
+                <div class="label">Tạo embedding</div>
+              </div>
+              <div class="step" data-step="database">
+                <div class="dot">3</div>
+                <div class="label">Lưu database</div>
+              </div>
+            </div>
+          </section>
+
+          <section class="card">
+            <div class="editor-head">
+              <div>
+                <h2>Tài liệu đã đồng bộ</h2>
+                <span class="editor-meta" id="documentCount">Đang tải...</span>
+              </div>
+              <button id="refreshDocuments" type="button">Làm mới</button>
+            </div>
+            <p class="muted" style="margin: 0 0 2px">
+              Bấm vào một tài liệu để xem chi tiết nội dung.
+            </p>
+            <div class="doc-list" id="documentRows">Đang tải dữ liệu...</div>
+          </section>
+        </div>
+      </main>
+    </div>
+
+    <div class="modal-overlay" id="docModal" hidden>
+      <div
+        class="modal"
+        role="dialog"
+        aria-modal="true"
+        aria-labelledby="docModalTitle"
+      >
+        <div class="modal-head">
+          <span class="ext" id="docModalExt"></span>
+          <div class="titles">
+            <h3 id="docModalTitle"></h3>
+            <span class="mono" id="docModalSource"></span>
+          </div>
+          <button
+            class="modal-close"
+            type="button"
+            id="docModalClose"
+            title="Đóng"
+          >
+            <svg
+              viewBox="0 0 24 24"
+              fill="none"
+              stroke="currentColor"
+              stroke-width="2"
+              stroke-linecap="round"
+            >
+              <path d="M18 6 6 18" />
+              <path d="M6 6l12 12" />
+            </svg>
+          </button>
+        </div>
+        <div class="modal-meta">
+          <span class="pill" id="docModalCategory"></span>
+          <span class="pill" id="docModalChunks"></span>
+          <span class="pill" id="docModalModel"></span>
+          <span class="status-dot" id="docModalStatus"></span>
+        </div>
+        <div class="modal-body">
+          <h4>Nội dung</h4>
+          <div class="modal-content-box" id="docModalContent">
+            Đang tải nội dung...
+          </div>
+        </div>
+        <div class="modal-foot">
+          <span class="muted" id="docModalUpdated"></span>
+          <button class="delete-document" type="button" id="docModalDelete">
+            <svg
+              viewBox="0 0 24 24"
+              fill="none"
+              stroke="currentColor"
+              stroke-width="1.9"
+              stroke-linecap="round"
+              stroke-linejoin="round"
+            >
+              <path d="M3 6h18" />
+              <path d="M8 6V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2" />
+              <path d="M19 6l-1 14a2 2 0 0 1-2 2H8a2 2 0 0 1-2-2L5 6" />
+              <path d="M10 11v6" />
+              <path d="M14 11v6" /></svg
+            >Xóa tài liệu
+          </button>
+        </div>
+      </div>
+    </div>
+
+    <script
+      src="/static/js/knowledge_admin.js?v=20260817-redesign4"
+      defer
+    ></script>
+  </body>
+</html>

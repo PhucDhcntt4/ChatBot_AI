@@ -4,9 +4,18 @@
     <meta charset="utf-8" />
     <meta name="viewport" content="width=device-width,initial-scale=1" />
     <title>Product Sync • Đông Hải</title>
-    <link rel="stylesheet" href="/static/css/product_admin.css" />
+    <link rel="stylesheet" href="/static/css/product_admin.css?v=20260815-redesign3" />
+    <link rel="stylesheet" href="/static/css/admin_sidebar.css?v=20260815-redesign2" />
   </head>
-  <body>
+  <body class="has-admin-sidebar">
+    <aside class="admin-sidebar">
+      <a class="admin-sidebar-brand" href="/admin/products"><img src="/static/assets/logo.jpg" alt="Đông Hải" /><span>Đông Hải AI</span></a>
+      <nav>
+        <a class="active" href="/admin/products"><span>◫</span>Sản phẩm</a>
+        <a href="/admin/knowledge"><span>▤</span>Knowledge</a>
+        <a href="/admin/prompts"><span>✎</span>Prompt</a>
+      </nav>
+    </aside>
     <header class="top">
       <div class="wrap">
         <div class="brand">ĐÔNG HẢI · PRODUCT ADMIN</div>
@@ -236,6 +245,22 @@
       <div class="ck-powered">Được phát triển bởi <b>Đông Hải</b></div>
     </section>
     <button class="ck-close" id="chatClose" aria-label="Đóng trợ lý">✕</button>
-    <script src="/static/js/product_admin.js" defer></script>
+    <div
+      class="ck-lightbox"
+      id="imageLightbox"
+      role="dialog"
+      aria-modal="true"
+      aria-label="Xem ảnh sản phẩm"
+      hidden
+    >
+      <button class="ck-lightbox-close" id="lightboxClose" type="button" aria-label="Đóng ảnh">&times;</button>
+      <button class="ck-lightbox-nav previous" id="lightboxPrev" type="button" aria-label="Ảnh trước">&#8249;</button>
+      <figure class="ck-lightbox-content">
+        <img id="lightboxImage" src="" alt="" />
+        <figcaption id="lightboxCaption"></figcaption>
+      </figure>
+      <button class="ck-lightbox-nav next" id="lightboxNext" type="button" aria-label="Ảnh tiếp theo">&#8250;</button>
+    </div>
+    <script src="/static/js/product_admin.js?v=20260814-lightbox2" defer></script>
   </body>
 </html>

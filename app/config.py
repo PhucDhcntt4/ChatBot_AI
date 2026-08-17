@@ -1,7 +1,7 @@
 from pathlib import Path
 import os
 
-from dotenv import load_dotenv
+from dotenv import load_dotenv # type: ignore
 
 
 PROJECT_ROOT = Path(__file__).resolve().parent.parent
@@ -9,8 +9,10 @@ load_dotenv(PROJECT_ROOT / ".env")
 
 PROMPT_DIR = PROJECT_ROOT / "prompts"
 DATA_DIR = PROJECT_ROOT / "data"
+KNOWLEDGE_DIR = PROJECT_ROOT / "knowledge"
 PLANNER_PROMPT_PATH = PROMPT_DIR / "conversation_planner.txt"
 PRESENTER_PROMPT_PATH = PROMPT_DIR / "conversation_presenter.txt"
+CTA_TEMPLATE_PATH = PROMPT_DIR / "cta_templates.txt"
 
 DATABASE_URL = os.getenv("DATABASE_URL", "").strip()
 AI_PROVIDER = os.getenv("AI_PROVIDER", "gemini").strip().casefold()
@@ -45,6 +47,8 @@ RAG_EMBEDDING_DIMENSION = int(os.getenv("RAG_EMBEDDING_DIMENSION", "768"))
 RAG_TOP_K = int(os.getenv("RAG_TOP_K", "5"))
 RAG_MIN_SIMILARITY = float(os.getenv("RAG_MIN_SIMILARITY", "0.45"))
 RAG_MAX_CONTEXT_CHARS = int(os.getenv("RAG_MAX_CONTEXT_CHARS", "6000"))
+RAG_CHUNK_SIZE = int(os.getenv("RAG_CHUNK_SIZE", "1200"))
+RAG_CHUNK_OVERLAP = int(os.getenv("RAG_CHUNK_OVERLAP", "180"))
 
 # Product image recognition. V2 always reads the product catalog from DB.
 PRODUCTS_PATH = PROJECT_ROOT / "products.json"
@@ -66,3 +70,7 @@ VECTOR_AUTO_ACCEPT_SIMILARITY = float(
 )
 VECTOR_MIN_MARGIN = float(os.getenv("VECTOR_MIN_MARGIN", "0.08"))
 VECTOR_MAX_CANDIDATES = int(os.getenv("VECTOR_MAX_CANDIDATES", "3"))
+
+VECTOR_REFERENCES_PER_PRODUCT = int(
+    os.getenv("VECTOR_REFERENCES_PER_PRODUCT", "2")
+)
