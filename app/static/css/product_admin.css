@@ -652,6 +652,7 @@ button.small:focus-visible,
   pointer-events: auto;
 }
 .ck-head {
+  position: relative;
   padding: 30px 24px 18px;
   text-align: center;
   flex-shrink: 0;
@@ -753,6 +754,38 @@ button.small:focus-visible,
   cursor: zoom-in;
   transition: filter 0.18s ease;
 }
+.ck-reset {
+  position: absolute;
+  top: 14px;
+  right: 14px;
+  width: 30px;
+  height: 30px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  padding: 0;
+  border: 1px solid rgba(171, 11, 42, 0.18);
+  border-radius: 50%;
+  background: rgba(255, 255, 255, 0.9);
+  color: var(--dh-red-dark);
+  cursor: pointer;
+  transition: 0.18s ease;
+}
+.ck-reset svg {
+  width: 15px;
+  height: 15px;
+}
+.ck-reset:hover {
+  background: var(--dh-red);
+  color: #fff;
+  transform: rotate(-40deg);
+  box-shadow: 0 6px 14px rgba(171, 11, 42, 0.22);
+}
+.ck-reset:disabled {
+  cursor: wait;
+  opacity: 0.55;
+  transform: none;
+}
 .ck-product-album img:hover {
   filter: brightness(0.92);
 }
@@ -845,7 +878,9 @@ body.lightbox-open {
   cursor: pointer;
   display: grid;
   place-items: center;
-  transition: background 0.18s ease, transform 0.18s ease;
+  transition:
+    background 0.18s ease,
+    transform 0.18s ease;
 }
 .ck-lightbox-close:hover,
 .ck-lightbox-nav:hover {
@@ -1075,7 +1110,7 @@ body.lightbox-open {
   outline: 2px solid var(--dh-red);
   outline-offset: 2px;
 }
-@media (max-width: 480px) {
+@media (max-width: 640px) {
   .toast-stack {
     top: 12px;
     right: 12px;
@@ -1105,11 +1140,11 @@ body.lightbox-open {
     right: calc(50% - 62px);
   }
   .ck-panel {
-    right: 10px;
-    left: 10px;
+    right: 8px;
+    left: 8px;
     width: auto;
-    bottom: 80px;
-    height: min(78vh, calc(100% - 100px));
+    bottom: 76px;
+    height: min(82vh, calc(100% - 96px));
   }
   .ck-launcher {
     right: 16px;
@@ -1174,7 +1209,11 @@ body.lightbox-open {
 
 body {
   background:
-    radial-gradient(circle at 92% 4%, rgba(173, 16, 40, 0.07), transparent 26rem),
+    radial-gradient(
+      circle at 92% 4%,
+      rgba(173, 16, 40, 0.07),
+      transparent 26rem
+    ),
     linear-gradient(145deg, #fffafa 0%, #f8f3f3 52%, #fff 100%);
 }
 
@@ -1193,7 +1232,11 @@ body.has-admin-sidebar > main.wrap {
   min-height: 250px;
   padding: 38px 0 78px;
   background:
-    radial-gradient(circle at 92% -10%, rgba(255, 255, 255, 0.12) 0 160px, transparent 161px),
+    radial-gradient(
+      circle at 92% -10%,
+      rgba(255, 255, 255, 0.12) 0 160px,
+      transparent 161px
+    ),
     linear-gradient(125deg, #7b0c1d 0%, #a90f28 48%, #c11936 100%);
 }
 
@@ -1416,7 +1459,6 @@ pre,
   .catalog-card {
     padding: 20px;
   }
-
 }
 
 @media (max-width: 760px) {

@@ -256,6 +256,7 @@ loadCatalog();
 let chatBusy = false;
 let chatHistory = [];
 let activeProductCodes = [];
+const CHAT_GREETING = "👋 Xin chào anh/chị! Em là trợ lý AI của Đông Hải. Anh/chị cần em hỗ trợ gì ạ?";
 function getChatSessionId() {
   let sessionId = localStorage.getItem("dong_hai_chat_session");
   if (!sessionId) {
@@ -406,6 +407,8 @@ function addProductAlbums(products) {
     urls.forEach((url, imageIndex) => {
       const image = document.createElement("img");
       image.src = url;
+      image.dataset.originalUrl = url;
+      image.dataset.cdnRetry = "0";
       image.alt = `${product.product_name || product.product_code || "Sản phẩm"}`;
       image.loading = "lazy";
       image.alt = `${productName}, ảnh ${imageIndex + 1}`;
@@ -421,7 +424,23 @@ function addProductAlbums(products) {
       image.onload = () => {
         $("chatBody").scrollTop = $("chatBody").scrollHeight;
       };
-      image.onerror = () => image.remove();
+      image.onerror = () => {
+        // Retry a stale Shopify version URL once without its query string.
+        if (image.dataset.cdnRetry === "0") {
+          const cleanUrl = image.dataset.originalUrl.split("?")[0];
+          if (cleanUrl && cleanUrl !== image.dataset.originalUrl) {
+            image.dataset.cdnRetry = "1";
+            image.src = cleanUrl;
+            return;
+          }
+        }
+        console.warn(
+          "Không tải được ảnh sản phẩm từ Shopify CDN:",
+          image.dataset.originalUrl,
+        );
+        image.remove();
+        if (!album.querySelector("img")) album.remove();
+      };
       album.appendChild(image);
     });
     $("chatBody").appendChild(album);
@@ -432,7 +451,44 @@ function setChatBusy(busy) {
   chatBusy = busy;
   $("chatSend").disabled = busy;
   $("chatAttach").disabled = busy;
+  $("chatReset").disabled = busy;
 }
+
+async function resetChatConversation() {
+  if (chatBusy) return;
+  const oldSessionId = getChatSessionId();
+  setChatBusy(true);
+  try {
+    const response = await fetch("/api/chat/reset", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        session_id: oldSessionId,
+        channel: "web",
+      }),
+    });
+    if (!response.ok) throw new Error("Không thể reset hội thoại");
+
+    localStorage.setItem("dong_hai_chat_session", crypto.randomUUID());
+    chatHistory = [];
+    activeProductCodes = [];
+    $("chatBody").replaceChildren();
+    addMsg(CHAT_GREETING, "bot");
+    $("chatInput").value = "";
+    $("chatInput").style.height = "40px";
+    $("chatImage").value = "";
+    $("chatInput").focus();
+  } catch (error) {
+    addMsg(
+      "Dạ, hiện em chưa thể tạo hội thoại mới. Anh/chị thử lại giúp em nhé.",
+      "bot",
+    );
+  } finally {
+    setChatBusy(false);
+  }
+}
+
+$("chatReset").onclick = resetChatConversation;
 function addTyping() {
   const el = document.createElement("div");
   el.className = "ck-msg bot typing";

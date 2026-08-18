@@ -1,3 +1,5 @@
+import re
+import unicodedata
 from typing import Any, Callable
 
 from app.config import PRODUCT_ALBUM_IMAGE_LIMIT
@@ -35,7 +37,49 @@ class ConversationExecutor:
         plan: ConversationPlan,
         context: ConversationContext,
     ) -> ExecutionResult:
+        # A model can classify "xem mẫu ABC01" as product_search while still
+        # extracting the exact product code. An exact code is authoritative:
+        # query it directly instead of sending it through fuzzy text search.
+        normalized_reference = re.sub(
+            r"[^A-Z0-9]",
+            "",
+            str(plan.reference_product_code or "").upper(),
+        )
+        normalized_query = re.sub(
+            r"[^A-Z0-9]",
+            "",
+            str(plan.search_query or "").upper(),
+        )
+        if (
+            plan.intent == ConversationIntent.PRODUCT_SEARCH
+            and normalized_reference
+            and (
+                not normalized_query
+                or normalized_query == normalized_reference
+            )
+        ):
+            return self._exact_product_search(plan, context)
         return self.handlers[plan.intent](message, plan, context)
+
+    def _exact_product_search(
+        self,
+        plan: ConversationPlan,
+        context: ConversationContext,
+    ) -> ExecutionResult:
+        product = self.products.public_info(plan.reference_product_code or "")
+        media = None
+        if product and (
+            plan.send_images
+            or product["product_code"] != context.latest_product_code
+        ):
+            media = self._media(product, plan.requested_color)
+        return ExecutionResult(
+            success=product is not None,
+            status="products_found" if product else "products_not_found",
+            intent=plan.intent,
+            products=[product] if product else [],
+            media=[media] if media else [],
+        )
 
     def _media(
         self, product: dict[str, Any], color: str | None = None
@@ -59,13 +103,63 @@ class ConversationExecutor:
             image_urls=urls,
         )
 
+    @staticmethod
+    def _needs_size_knowledge(message: str, plan: ConversationPlan) -> bool:
+        normalized = unicodedata.normalize("NFD", message.casefold())
+        normalized = "".join(
+            character
+            for character in normalized
+            if unicodedata.category(character) != "Mn"
+        ).replace("đ", "d")
+        requested = {
+            str(item).strip().casefold()
+            for item in plan.requested_attributes
+        }
+        asks_size_advice = any(
+            phrase in normalized
+            for phrase in (
+                "tu van size",
+                "chon size",
+                "mang size nao",
+                "chan dai",
+                "chieu dai chan",
+                "do dai ban chan",
+            )
+        ) or bool(re.search(r"\b\d+(?:[.,]\d+)?\s*cm\b", normalized))
+        return asks_size_advice or bool(
+            requested.intersection({"size_advice", "size_guide"})
+        )
+
+    @staticmethod
+    def _payment_knowledge_query(plan: ConversationPlan) -> str | None:
+        if plan.payment_method == "cod":
+            return "Phương thức thanh toán COD khi nhận hàng và phí giao hàng"
+        if plan.payment_method == "bank_transfer":
+            return "Phương thức thanh toán chuyển khoản và thông tin thanh toán"
+        return None
+
     def _product_search(self, message, plan, context) -> ExecutionResult:
         query = plan.search_query or plan.reference_product_code or message
         found = self.products.search(query, limit=plan.requested_count)
         media = [item for product in found if (item := self._media(product))]
+        # A bare/explicit product code may be classified by the AI as search
+        # instead of product_information. Treat the exact single-code result as
+        # a product introduction and include its album without trusting the
+        # probabilistic send_images flag.
+        normalized_query = re.sub(r"[^A-Z0-9]", "", str(query).upper())
+        exact_code_result = bool(
+            len(found) == 1
+            and normalized_query == str(found[0].get("product_code", "")).upper()
+        )
+        should_send_media = plan.send_images or (
+            exact_code_result
+            and found[0]["product_code"] != context.latest_product_code
+        )
         return ExecutionResult(
             success=bool(found), status="products_found" if found else "products_not_found",
-            intent=plan.intent, products=found, media=media if plan.send_images else [],
+            intent=plan.intent,
+            products=found,
+            media=media if should_send_media else [],
         )
 
     def _product_info(self, message, plan, context) -> ExecutionResult:
@@ -76,13 +170,38 @@ class ConversationExecutor:
             product
             and product["product_code"] != context.latest_product_code
         )
-        media = self._media(product) if is_new_product else None
+        # Product information follow-ups (size, color, material, order data)
+        # must remain text-only. An album is attached only when the planner
+        # explicitly marks this turn as an image/introduction request.
+        media = (
+            self._media(product)
+            if is_new_product and plan.send_images
+            else None
+        )
+        knowledge_context = ""
+        sources: list[dict[str, Any]] = []
+        promotion_requested = "promotion" in {
+            str(item).strip().casefold()
+            for item in plan.requested_attributes
+        }
+        knowledge_query = self._payment_knowledge_query(plan)
+        if promotion_requested:
+            knowledge_query = message
+        if self.knowledge_search and (
+            knowledge_query or self._needs_size_knowledge(message, plan)
+        ):
+            knowledge_result = self.knowledge_search(knowledge_query or message)
+            if knowledge_result.get("success"):
+                knowledge_context = str(knowledge_result.get("content") or "")
+                sources = list(knowledge_result.get("sources") or [])
         return ExecutionResult(
             success=product is not None,
             status="product_found" if product else "product_context_missing",
             intent=plan.intent,
             products=[product] if product else [],
             media=[media] if media else [],
+            knowledge_context=knowledge_context,
+            sources=sources,
             facts={"requested_attributes": plan.requested_attributes},
         )
 

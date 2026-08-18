@@ -25,6 +25,17 @@ class AdminTests(unittest.TestCase):
         self.assertIn('fetch("/api/chat/image"', response.text)
         self.assertNotIn('fetch("/admin/products/api/chat"', response.text)
 
+    def test_admin_chat_can_start_a_new_conversation(self):
+        page = self.client.get("/admin/products")
+        script = self.client.get("/static/js/product_admin.js")
+        self.assertIn('id="chatReset"', page.text)
+        self.assertIn('fetch("/api/chat/reset"', script.text)
+        self.assertIn("crypto.randomUUID()", script.text)
+        self.assertIn(
+            '<div class="ck-msg bot">👋 Xin chào anh/chị!',
+            page.text,
+        )
+
     def test_old_admin_chat_routes_do_not_exist(self):
         self.assertEqual(
             self.client.post("/admin/products/api/chat", json={}).status_code,

@@ -13,6 +13,8 @@ KNOWLEDGE_DIR = PROJECT_ROOT / "knowledge"
 PLANNER_PROMPT_PATH = PROMPT_DIR / "conversation_planner.txt"
 PRESENTER_PROMPT_PATH = PROMPT_DIR / "conversation_presenter.txt"
 CTA_TEMPLATE_PATH = PROMPT_DIR / "cta_templates.txt"
+FAST_RESPONSE_PATH = PROMPT_DIR / "fast_responses.txt"
+PROMOTION_RULES_PATH = PROMPT_DIR / "promotion_rules.txt"
 
 DATABASE_URL = os.getenv("DATABASE_URL", "").strip()
 AI_PROVIDER = os.getenv("AI_PROVIDER", "gemini").strip().casefold()
@@ -39,6 +41,20 @@ def env_bool(name: str, default: bool = False) -> bool:
 
 
 RAG_ENABLED = env_bool("RAG_ENABLED", False)
+
+# Google Sheets order export. The integration is disabled by default so local
+# development and tests never contact Google unless explicitly configured.
+GOOGLE_SHEETS_ENABLED = env_bool("GOOGLE_SHEETS_ENABLED", False)
+GOOGLE_SHEETS_SPREADSHEET_ID = os.getenv(
+    "GOOGLE_SHEETS_SPREADSHEET_ID", ""
+).strip()
+GOOGLE_SHEETS_ORDERS_RANGE = os.getenv(
+    "GOOGLE_SHEETS_ORDERS_RANGE", "Orders!A:V"
+).strip()
+GOOGLE_SERVICE_ACCOUNT_FILE = os.getenv(
+    "GOOGLE_SERVICE_ACCOUNT_FILE",
+    "secrets/google-sheets-service-account.json",
+).strip()
 RAG_EMBEDDING_PROVIDER = os.getenv(
     "RAG_EMBEDDING_PROVIDER", "auto"
 ).strip().casefold()

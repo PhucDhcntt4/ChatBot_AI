@@ -19,6 +19,8 @@ PROMPT_FILES = {
     "product_recognition.txt": "Xác minh sản phẩm",
     "product_reply.txt": "Trả lời nhận diện ảnh",
     "cta_templates.txt": "Câu CTA",
+    "fast_responses.txt": "Câu trả lời nhanh",
+    "promotion_rules.txt": "Chương trình khuyến mãi",
 }
 
 
@@ -46,6 +48,8 @@ def _apply_runtime(request: Request, name: str, content: str) -> None:
         conversation.ai.planner_prompt = content
     elif name == "conversation_presenter.txt" and conversation:
         conversation.ai.presenter_prompt = content
+    elif name == "promotion_rules.txt" and conversation:
+        conversation.ai.promotion_rules = content
     elif name == "image_intent.txt" and image_service:
         image_service.intent_service.prompt = content
     elif name == "product_recognition.txt" and image_service:

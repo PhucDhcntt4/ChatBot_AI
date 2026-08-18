@@ -7,7 +7,7 @@ from fastapi.responses import RedirectResponse
 from fastapi.staticfiles import StaticFiles
 
 from app.ai.factory import create_ai_provider
-from app.config import AI_PROVIDER, RAG_ENABLED
+from app.config import AI_PROVIDER, GOOGLE_SHEETS_ENABLED, RAG_ENABLED
 from app.conversation.context import conversation_context_store
 from app.conversation.executor import ConversationExecutor
 from app.conversation.image_service import ProductImageConversationService
@@ -17,6 +17,7 @@ from app.database.product_repository import ProductRepository
 from app.routes.admin_product_router import router as admin_product_router
 from app.routes.admin_knowledge_router import router as admin_knowledge_router
 from app.routes.admin_prompt_router import router as admin_prompt_router
+from app.services.sheets_service import SheetsService
 
 
 logger = logging.getLogger("uvicorn.error")
@@ -45,13 +46,20 @@ async def lifespan(app: FastAPI):
         products=ProductRepository(),
         knowledge_search=create_knowledge_search(),
     )
-    app.state.conversation_service = ConversationService(ai, executor)
+    sheets_service = SheetsService()
+    sheets_service.validate()
+    app.state.conversation_service = ConversationService(
+        ai,
+        executor,
+        sheets_service=sheets_service,
+    )
     app.state.image_conversation_service = ProductImageConversationService(
         ai=ai,
         context_store=conversation_context_store,
         repository=executor.products,
     )
     logger.info("Conversation V2 ready provider=%s model=%s", ai.provider_name, ai.model)
+    logger.info("Google Sheets order export enabled=%s", GOOGLE_SHEETS_ENABLED)
     yield
 
 
@@ -87,6 +95,7 @@ def health(request: Request):
         "database": database,
         "database_error": database_error,
         "rag_enabled": RAG_ENABLED,
+        "google_sheets_enabled": GOOGLE_SHEETS_ENABLED,
     }
 
 

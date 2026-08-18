@@ -1,3 +1,5 @@
+import re
+
 from app.ai.base import AIProvider
 from app.conversation.models import (
     ConversationContext,
@@ -17,7 +19,9 @@ class ConversationPresenter:
         result: ExecutionResult,
         context: ConversationContext,
     ) -> str:
-        reply = self.ai.present(message, plan, result, context).strip()
+        reply = self.normalize_customer_address(
+            self.ai.present(message, plan, result, context).strip()
+        )
         if reply:
             return self.with_cta(reply, result)
         fallback = (
@@ -27,9 +31,23 @@ class ConversationPresenter:
         return self.with_cta(fallback, result)
 
     @staticmethod
+    def normalize_customer_address(text: str) -> str:
+        def replacement(match: re.Match[str]) -> str:
+            return "Anh/chị" if match.group(0)[0].isupper() else "anh/chị"
+
+        return re.sub(
+            r"\b(?:bạn|quý\s+khách)\b",
+            replacement,
+            text,
+            flags=re.IGNORECASE,
+        )
+
+    @staticmethod
     def with_cta(reply: str, result: ExecutionResult) -> str:
         cta = (result.cta_text or "").strip()
         normalized_reply = reply.strip()
-        if not cta or cta in normalized_reply:
+        comparable_reply = re.sub(r"\s+", " ", normalized_reply).casefold()
+        comparable_cta = re.sub(r"\s+", " ", cta).casefold()
+        if not cta or comparable_cta in comparable_reply:
             return normalized_reply
         return f"{normalized_reply}\n\n{cta}"

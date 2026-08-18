@@ -4,12 +4,18 @@ import os
 from openai import OpenAI
 
 from app.ai.base import AIProvider
-from app.config import OPENAI_MODEL, PLANNER_PROMPT_PATH, PRESENTER_PROMPT_PATH
+from app.config import (
+    OPENAI_MODEL,
+    PLANNER_PROMPT_PATH,
+    PRESENTER_PROMPT_PATH,
+    PROMOTION_RULES_PATH,
+)
 from app.conversation.models import (
     ConversationContext,
     ConversationPlan,
     ExecutionResult,
 )
+from app.conversation.cta import CTA_TEMPLATES
 
 
 class OpenAIProvider(AIProvider):
@@ -23,17 +29,22 @@ class OpenAIProvider(AIProvider):
         self.model = OPENAI_MODEL
         self.planner_prompt = PLANNER_PROMPT_PATH.read_text(encoding="utf-8")
         self.presenter_prompt = PRESENTER_PROMPT_PATH.read_text(encoding="utf-8")
+        self.promotion_rules = PROMOTION_RULES_PATH.read_text(encoding="utf-8")
 
     def create_plan(
         self, message: str, context: ConversationContext
     ) -> ConversationPlan:
         response = self.client.responses.parse(
             model=self.model,
-            instructions=self.planner_prompt,
+            instructions=self.planner_prompt + "\n\n" + self.promotion_rules,
             input=json.dumps(
                 {
                     "message": message,
                     "context": context.model_dump(mode="json"),
+                    "cta_candidates": {
+                        cta_type.value: list(sentences)
+                        for cta_type, sentences in CTA_TEMPLATES.items()
+                    },
                 },
                 ensure_ascii=False,
             ),
@@ -50,15 +61,19 @@ class OpenAIProvider(AIProvider):
         result: ExecutionResult,
         context: ConversationContext,
     ) -> str:
+        verified_result = result.model_dump(mode="json")
         response = self.client.responses.create(
             model=self.model,
-            instructions=self.presenter_prompt,
+            instructions=self.presenter_prompt + "\n\n" + self.promotion_rules,
             input=json.dumps(
                 {
                     "customer_message": message,
                     "plan": plan.model_dump(mode="json"),
-                    "verified_result": result.model_dump(mode="json"),
-                    "recent_history": [item.model_dump() for item in context.history[-4:]],
+                    "verified_result": verified_result,
+                    "promotion_history": [
+                        item.model_dump(mode="json")
+                        for item in context.history[-8:]
+                    ],
                 },
                 ensure_ascii=False,
             ),

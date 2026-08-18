@@ -13,3 +13,6 @@ knowledge/*
 # Ignore products
 products.json
 
+secrets/
+*.service.json
+secrets/

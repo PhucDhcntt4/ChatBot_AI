@@ -1,12 +1,8 @@
-import json
 import logging
-import re
 
 from google import genai
-from google.genai import types # type: ignore
 
 from app.config import (
-    PRODUCT_REPLY_PROMPT_PATH,
     PRODUCT_VECTOR_SEARCH_ENABLED,
     VECTOR_AUTO_ACCEPT_SIMILARITY,
     VECTOR_MIN_MARGIN,
@@ -50,9 +46,6 @@ class ProductImageHandler:
             client=client,
             model=model,
             catalog=self.catalog,
-        )
-        self.reply_prompt = PRODUCT_REPLY_PROMPT_PATH.read_text(
-            encoding="utf-8"
         )
         self.vector_enabled = PRODUCT_VECTOR_SEARCH_ENABLED
         self.embedding_service = None
@@ -233,38 +226,51 @@ class ProductImageHandler:
             and selected_code != top_code
             and decision.margin < VECTOR_MIN_MARGIN
         ):
-            top_verification = self.recognition.verify_exact_match(
-                image_bytes=original_image_bytes or image_bytes,
-                mime_type=original_mime_type or mime_type,
-                product_code=top_code,
-            )
-            top_recheck_details = (
-                "; ".join(top_verification.mismatches)
-                if top_verification.mismatches
-                else (
-                    "matched_reference="
-                    f"{top_verification.matched_reference}"
+            try:
+                top_verification = self.recognition.verify_exact_match(
+                    image_bytes=original_image_bytes or image_bytes,
+                    mime_type=original_mime_type or mime_type,
+                    product_code=top_code,
                 )
-            )
-            logger.info(
-                "VECTOR TOP RECHECK code=%s exact=%s confidence=%.3f "
-                "details=%s",
-                top_code,
-                top_verification.exact_match,
-                top_verification.confidence,
-                top_recheck_details,
-            )
-            if (
-                top_verification.exact_match
-                and top_verification.confidence >= 0.90
-            ):
-                verification.exact_match = True
-                verification.product_code = top_code
-                verification.confidence = top_verification.confidence
-                verification.reason = (
-                    "Vector leader confirmed by dedicated recheck: "
-                    f"{top_recheck_details}"
+            except Exception as error:
+                # This is an optional tie-breaker. A temporary provider error
+                # must not discard the shortlist result already verified above.
+                logger.warning(
+                    "VECTOR TOP RECHECK SKIPPED code=%s error=%s; "
+                    "keep_selected=%s confidence=%.3f",
+                    top_code,
+                    error,
+                    selected_code,
+                    verification.confidence,
                 )
+            else:
+                top_recheck_details = (
+                    "; ".join(top_verification.mismatches)
+                    if top_verification.mismatches
+                    else (
+                        "matched_reference="
+                        f"{top_verification.matched_reference}"
+                    )
+                )
+                logger.info(
+                    "VECTOR TOP RECHECK code=%s exact=%s confidence=%.3f "
+                    "details=%s",
+                    top_code,
+                    top_verification.exact_match,
+                    top_verification.confidence,
+                    top_recheck_details,
+                )
+                if (
+                    top_verification.exact_match
+                    and top_verification.confidence >= 0.90
+                ):
+                    verification.exact_match = True
+                    verification.product_code = top_code
+                    verification.confidence = top_verification.confidence
+                    verification.reason = (
+                        "Vector leader confirmed by dedicated recheck: "
+                        f"{top_recheck_details}"
+                    )
 
         if (
             not verification.exact_match
@@ -412,63 +418,12 @@ class ProductImageHandler:
                 "product_codes": [],
             }
 
-        payload = {
-            "status": (
-                "candidates_found"
-                if candidates
-                else "not_confident"
-            ),
-            "candidates": candidates,
-        }
-        response = self.client.models.generate_content(
-            model=self.model,
-            contents=json.dumps(
-                payload,
-                ensure_ascii=False,
-            ),
-            config=types.GenerateContentConfig(
-                system_instruction=self.reply_prompt,
-                temperature=0.2,
-            ),
-        )
-        allowed_codes = {
-            item["product"]["product_code"]
-            for item in candidates
-        }
-        if response.text:
-            reply = response.text.strip()
-            mentioned_codes = set(
-                re.findall(
-                    r"\b[A-Z]\d{3,}[A-Z0-9]*\b",
-                    reply.upper(),
-                )
-            )
-            if mentioned_codes.issubset(allowed_codes):
-                return {
-                    "reply": reply,
-                    "product_codes": sorted(allowed_codes),
-                    "follow_up": (
-                        "Anh/chị cần tư vấn thêm hay muốn đặt "
-                        "hàng mẫu này không ạ? ❤️"
-                    ),
-                }
-
-        top = candidates[0]
-        product = top["product"]
-        confidence = top["confidence"]
-        wording = (
-            "em nhận diện được"
-            if confidence >= 0.90
-            else "sản phẩm trong ảnh khá giống"
-        )
+        # Conversation V2 formats the customer response through its presenter.
+        # Return verified codes directly instead of spending another Gemini
+        # request on a reply that image_service does not consume.
         return {
-            "reply": (
-                f"Dạ {wording} mẫu {product['product_name']}, "
-                f"mã {product['product_code']} ạ."
-            ),
-            "product_codes": [product["product_code"]],
-            "follow_up": (
-                "Anh/chị cần tư vấn thêm hay muốn đặt "
-                "hàng mẫu này không ạ? ❤️"
-            ),
+            "product_codes": sorted({
+                item["product"]["product_code"]
+                for item in candidates
+            }),
         }

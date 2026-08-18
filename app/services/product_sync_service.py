@@ -8,7 +8,7 @@ from app.scripts.build_product_image_embeddings import (
     main as build_product_image_embeddings,
 )
 from app.scripts.sync_product_images import sync_product_images
-from test import (
+from app.services.product_import_service import (
     find_products_by_sku,
     import_products_to_database,
     normalize_sku,
