@@ -146,10 +146,41 @@ class CTAService:
         context: ConversationContext,
     ) -> CTAType:
         product = result.products[0] if len(result.products) == 1 else None
+        if result.status == "human_handoff_requested":
+            return CTAType.NONE
+        if (
+            plan.intent == ConversationIntent.PRODUCT_RECOMMENDATION
+            and result.success
+        ):
+            return CTAType.CHOOSE_PRODUCT
+        knowledge_categories = {
+            str(item).strip().casefold()
+            for item in (plan.knowledge_categories or [])
+        }
+        if (
+            plan.use_knowledge
+            and "size_guide" in knowledge_categories
+            and not plan.buying_intent
+        ):
+            return CTAType.SIZE_SUPPORT
+        validation_errors = {
+            str(item).strip()
+            for item in (result.facts.get("product_validation_errors") or [])
+        }
+        if validation_errors.intersection({
+            "color_unavailable",
+            "size_unavailable_for_color",
+        }):
+            return CTAType.OUT_OF_STOCK_OPTIONS
         has_color_options = bool((product or {}).get("colors"))
         has_size_options = bool((product or {}).get("available_sizes"))
         if result.facts.get("order_confirmed") or result.facts.get("order_cancelled"):
             return CTAType.NONE
+        if (
+            plan.promotion_action == "recommend"
+            and plan.promotion_eligible is True
+        ):
+            return CTAType.APPLY_PROMOTION
         if context.sales_stage == SalesStage.COLLECTING_PRODUCT:
             missing = set(result.facts.get("missing_product_fields") or [])
             if "product_code" in missing:

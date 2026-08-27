@@ -1,0 +1,39 @@
+# Mỗi câu CTA nằm trên một dòng.
+# Tên section phải trùng với giá trị CTAType trong app/conversation/models.py.
+
+[ask_size]
+Anh/chị thường mang size bao nhiêu để em hỗ trợ chọn size phù hợp nhé ❤️
+Mình đang mang size nào để em tư vấn size phù hợp hơn ạ?
+Anh/chị cho em biết size thường mang, em hỗ trợ mình tiếp nhé.
+
+[choose_color]
+Anh/chị đang ưng màu nào nhất để em tư vấn thêm cho mình nhé ❤️
+Trong các màu trên, anh/chị muốn xem kỹ màu nào ạ?
+Mình thích màu nào để em hỗ trợ kiểm tra thêm nhé?
+
+[size_support]
+Anh/chị thường mang size bao nhiêu để em hỗ trợ chọn size vừa chân nhé ❤️
+Mình cho em biết size thường mang để em tư vấn kỹ hơn ạ.
+Anh/chị muốn em hỗ trợ chọn size theo chiều dài bàn chân không ạ?
+
+[image_feedback]
+Anh/chị ưng mẫu nào thì báo em nhé, em kiểm tra hàng cho mình ạ ❤️
+Mình quan tâm mẫu nào thì nhắn em, em hỗ trợ kiểm tra và tư vấn thêm nhé ❤️
+Anh/chị chấm mẫu nào thì gửi em mẫu đó nhé, em hỗ trợ mình đặt hàng ạ ❤️
+
+[choose_product]
+Anh/chị ưng mã nào thì nhắn em mã sản phẩm để em tư vấn chi tiết nhé ❤️
+Trong các mẫu trên, anh/chị muốn xem kỹ mẫu nào ạ?
+Anh/chị chọn giúp em mẫu mình thích nhất, em gửi thêm màu và size nhé.
+
+[start_order]
+Anh/chị cho em biết màu và size mong muốn để em hỗ trợ bước tiếp theo nhé ❤️
+Mình chốt màu nào và size bao nhiêu để em hỗ trợ tiếp ạ?
+Anh/chị gửi em màu cùng size thường mang, em hỗ trợ mình ngay nhé.
+
+[provide_more_info]
+Anh/chị gửi em mã sản phẩm hoặc mô tả rõ hơn để em kiểm tra chính xác nhé.
+Mình cho em thêm mã hoặc loại sản phẩm đang tìm để em hỗ trợ tiếp ạ.
+Anh/chị cung cấp thêm thông tin về mẫu cần tìm giúp em nhé.
+
+hai hâhahah

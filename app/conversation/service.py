@@ -3,10 +3,11 @@ from time import perf_counter
 
 from app.ai.base import AIProvider
 from app.conversation.context import (
-    ConversationContextStore,
+    ConversationContextStoreProtocol,
     conversation_context_store,
 )
 from app.conversation.cta import CTAService
+from app.conversation.content_blocks import build_content_blocks
 from app.conversation.executor import ConversationExecutor
 from app.conversation.fast_response import FastResponseService
 from app.conversation.models import (
@@ -28,7 +29,7 @@ class ConversationService:
         self,
         ai: AIProvider,
         executor: ConversationExecutor | None = None,
-        context_store: ConversationContextStore | None = None,
+        context_store: ConversationContextStoreProtocol | None = None,
         sheets_service: SheetsService | None = None,
     ) -> None:
         self.ai = ai
@@ -150,6 +151,16 @@ class ConversationService:
                 }
                 for item in order.get("items", [])
             ],
+            "pending_items": [
+                {
+                    "product_code": item.get("product_code"),
+                    "color": item.get("color"),
+                    "size": item.get("size"),
+                    "quantity": item.get("quantity"),
+                    "missing_fields": item.get("missing_fields"),
+                }
+                for item in order.get("pending_items", [])
+            ],
             "contact_fields": [
                 field
                 for field in (
@@ -180,15 +191,18 @@ class ConversationService:
         plan_seconds = perf_counter() - plan_started
         logger.info(
             "V2 PLAN channel=%s session=%s intent=%s code=%s query=%s "
-            "color=%s size=%s quantity=%s requested_items=%s buying=%s suggested_cta=%s "
-            "cta_index=%s send_images=%s time=%.3fs",
+            "rag=%s rag_query=%s rag_categories=%s "
+            "color=%s size=%s quantity=%s quantity_explicit=%s requested_items=%s buying=%s suggested_cta=%s "
+            "cta_index=%s send_images=%s explicit_image=%s time=%.3fs",
             channel, session_id, plan.intent.value, plan.reference_product_code,
-            plan.search_query, plan.requested_color, plan.requested_size,
-            plan.requested_quantity,
+            plan.search_query, plan.use_knowledge, plan.knowledge_query,
+            plan.knowledge_categories, plan.requested_color, plan.requested_size,
+            plan.requested_quantity, plan.quantity_explicitly_provided,
             [item.model_dump(mode="json") for item in plan.requested_items],
             plan.buying_intent,
             plan.suggested_cta_type.value if plan.suggested_cta_type else None,
-            plan.suggested_cta_index, plan.send_images, plan_seconds,
+            plan.suggested_cta_index, plan.send_images,
+            plan.explicit_image_request, plan_seconds,
         )
 
         execution_started = perf_counter()
@@ -236,6 +250,12 @@ class ConversationService:
             intent=plan.intent,
             products=result.products,
             media=result.media,
+            content_blocks=build_content_blocks(
+                reply,
+                result.products,
+                result.media,
+                result.cta_text,
+            ),
             sources=result.sources,
             cta_type=result.cta_type,
             cta_text=result.cta_text,

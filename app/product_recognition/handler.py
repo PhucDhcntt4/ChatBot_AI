@@ -33,6 +33,9 @@ logger = logging.getLogger("uvicorn.error")
 
 
 class ProductImageHandler:
+    TOP_RECHECK_MIN_CONFIDENCE = 0.98
+    TOP_RECHECK_MIN_ADVANTAGE = 0.05
+
     def __init__(
         self,
         client: genai.Client,
@@ -207,9 +210,10 @@ class ProductImageHandler:
         )
 
         # A near tie means the joint verifier is comparing very similar
-        # products. If it rejects the vector leader and selects another code,
-        # validate the leader alone with its complete catalog image set before
-        # committing to the other product.
+        # products. The shortlist verifier sees all candidates together and is
+        # authoritative when it is highly confident. A dedicated check of the
+        # vector leader may only override a weaker shortlist result when it is
+        # both near-certain and materially more confident.
         top_candidate = decision.best_candidate
         top_code = (
             str(top_candidate.get("product_code") or "").strip().upper()
@@ -222,6 +226,7 @@ class ProductImageHandler:
         if (
             verification.exact_match
             and selected_code
+            and verification.confidence < self.TOP_RECHECK_MIN_CONFIDENCE
             and top_code
             and selected_code != top_code
             and decision.margin < VECTOR_MIN_MARGIN
@@ -260,9 +265,10 @@ class ProductImageHandler:
                     top_verification.confidence,
                     top_recheck_details,
                 )
-                if (
-                    top_verification.exact_match
-                    and top_verification.confidence >= 0.90
+                if self._should_override_shortlist(
+                    selected_confidence=verification.confidence,
+                    top_exact=top_verification.exact_match,
+                    top_confidence=top_verification.confidence,
                 ):
                     verification.exact_match = True
                     verification.product_code = top_code
@@ -270,6 +276,16 @@ class ProductImageHandler:
                     verification.reason = (
                         "Vector leader confirmed by dedicated recheck: "
                         f"{top_recheck_details}"
+                    )
+                elif top_verification.exact_match:
+                    logger.info(
+                        "VECTOR TOP RECHECK NOT OVERRIDDEN keep=%s "
+                        "selected_confidence=%.3f top=%s "
+                        "top_confidence=%.3f",
+                        selected_code,
+                        verification.confidence,
+                        top_code,
+                        top_verification.confidence,
                     )
 
         if (
@@ -287,6 +303,22 @@ class ProductImageHandler:
             "visual_reason": verification.reason,
             "product": product,
         }]
+
+    @classmethod
+    def _should_override_shortlist(
+        cls,
+        *,
+        selected_confidence: float,
+        top_exact: bool,
+        top_confidence: float,
+    ) -> bool:
+        if not top_exact:
+            return False
+        return bool(
+            top_confidence >= cls.TOP_RECHECK_MIN_CONFIDENCE
+            and top_confidence - selected_confidence
+            >= cls.TOP_RECHECK_MIN_ADVANTAGE
+        )
 
     def _match_with_legacy_gemini(
         self,

@@ -46,6 +46,19 @@ class AdminTests(unittest.TestCase):
             404,
         )
 
+    def test_conversation_admin_page_is_available(self):
+        response = self.client.get("/admin/conversations")
+        self.assertEqual(response.status_code, 200)
+        self.assertIn("Quản lý hội thoại", response.text)
+        self.assertIn("/static/js/conversation_admin.js", response.text)
+
+    def test_conversation_admin_list_api_is_available(self):
+        response = self.client.get(
+            "/admin/conversations/api/sessions?limit=20&offset=0"
+        )
+        self.assertEqual(response.status_code, 200)
+        self.assertIn("sessions", response.json())
+
     def test_excel_accepts_vietnamese_product_code_header(self):
         workbook = Workbook()
         sheet = workbook.active

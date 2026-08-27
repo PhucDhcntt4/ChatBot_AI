@@ -15,6 +15,7 @@ from app.conversation.models import (
 )
 from app.conversation.service import ConversationService
 from app.conversation.presenter import ConversationPresenter
+from app.database.product_repository import ProductRepository
 from app.conversation.planner import ConversationPlanner
 from app.conversation.order_flow import OrderFlowService
 from app.database.product_repository import ProductRepository
@@ -64,6 +65,23 @@ ACCESSORY_PRODUCT = {
     "image_urls_by_color": {},
 }
 
+SECOND_ACCESSORY_PRODUCT = {
+    **ACCESSORY_PRODUCT,
+    "product_code": "PK02",
+    "product_name": "Túi da Đông Hải",
+    "prices": [700000],
+    "variant_prices": [{
+        "color": "Nâu",
+        "size": "",
+        "price": 700000,
+        "available": True,
+    }],
+    "colors": ["Nâu"],
+    "availability_by_color": {
+        "Nâu": {"available": True, "available_sizes": []},
+    },
+}
+
 
 class FakeRepository:
     def public_info(self, code):
@@ -109,11 +127,94 @@ class FakeAI(AIProvider):
 
 
 class ConversationTests(unittest.TestCase):
+    def test_presenter_naturalizes_product_acknowledgement(self):
+        text = (
+            "Dạ, em ghi nhận mẫu Giày Thể Thao Zuciani The Trend Walkers "
+            "N27 màu Trắng size 37 (920.000 đ) vào đơn cho anh ạ."
+        )
+        self.assertEqual(
+            ConversationPresenter.naturalize_acknowledgement(text),
+            "Dạ, anh/chị đang chọn mẫu Giày Thể Thao Zuciani The Trend "
+            "Walkers N27 màu Trắng size 37 (920.000 đ) ạ.",
+        )
+
+    def test_presenter_naturalizes_contact_acknowledgement(self):
+        self.assertEqual(
+            ConversationPresenter.naturalize_acknowledgement(
+                "Dạ, em ghi nhận thông tin của anh Tuấn (0764891234) ạ."
+            ),
+            "",
+        )
+
+    def test_product_search_extracts_vietnamese_height_constraints(self):
+        self.assertEqual(
+            ProductRepository._requested_heights(
+                "Tư vấn mình mẫu sandal 5 phân, guốc 7 phân nha"
+            ),
+            {5.0, 7.0},
+        )
+
+    def test_product_height_parser_reads_catalog_height(self):
+        self.assertEqual(
+            ProductRepository._height_values("Gót cao 7cm"),
+            {7.0},
+        )
+
+    def test_product_description_does_not_expose_stale_variant_facts(self):
+        description = (
+            "Giày sandal có quai nhúng nữ tính. "
+            "Mẫu giày có 3 màu: đen, hồng, xanh lá. "
+            "- Mã sản phẩm: S81Q8 - Màu: Đen, Hồng, Xanh Lá "
+            "- Size: 35 - 39"
+        )
+
+        cleaned = ProductRepository._presentation_description(description)
+
+        self.assertEqual(cleaned, "Giày sandal có quai nhúng nữ tính.")
+        self.assertNotIn("Đen", cleaned)
+        self.assertNotIn("35 - 39", cleaned)
+
     def setUp(self):
         executor = ConversationExecutor(products=FakeRepository())
         self.service = ConversationService(
             FakeAI(), executor, ConversationContextStore()
         )
+
+    def test_general_chat_is_not_replaced_by_missing_knowledge_reply(self):
+        presenter = ConversationPresenter(FakeAI())
+        plan = ConversationPlan(intent=ConversationIntent.GENERAL_CHAT)
+        result = ExecutionResult(
+            success=True,
+            status="general_chat",
+            intent=ConversationIntent.GENERAL_CHAT,
+        )
+
+        reply = presenter.present(
+            "Chào em nhé",
+            plan,
+            result,
+            ConversationContext(session_id="greeting", channel="web"),
+        )
+
+        self.assertEqual(reply, "reply:general_chat")
+
+    def test_unknown_intent_uses_missing_knowledge_reply(self):
+        presenter = ConversationPresenter(FakeAI())
+        plan = ConversationPlan(intent=ConversationIntent.UNKNOWN)
+        result = ExecutionResult(
+            success=False,
+            status="intent_unknown",
+            intent=ConversationIntent.UNKNOWN,
+        )
+
+        reply = presenter.present(
+            "Nội dung không xác định",
+            plan,
+            result,
+            ConversationContext(session_id="unknown", channel="web"),
+        )
+
+        self.assertEqual(reply, presenter.INSUFFICIENT_KNOWLEDGE_REPLY)
 
     def test_exact_code_uses_direct_lookup_when_classified_as_search(self):
         executor = ConversationExecutor(products=FakeRepository())
@@ -294,6 +395,28 @@ class ConversationTests(unittest.TestCase):
         self.assertEqual(rendered, reply)
         self.assertEqual(rendered.casefold().count("mã sản phẩm"), 1)
 
+    def test_presenter_does_not_append_semantically_duplicate_more_info_cta(self):
+        reply = (
+            "Dạ, em chưa tìm thấy sản phẩm khớp với các hình ảnh này trong "
+            "hệ thống. Anh/chị gửi thêm mã sản phẩm hoặc ảnh rõ hơn, chụp "
+            "trọn sản phẩm giúp em nhé. 😊"
+        )
+        result = ExecutionResult(
+            success=False,
+            status="products_not_found",
+            intent=ConversationIntent.PRODUCT_SEARCH,
+            cta_type=CTAType.PROVIDE_MORE_INFO,
+            cta_text=(
+                "Anh/chị gửi em mã sản phẩm hoặc mô tả rõ hơn để em kiểm "
+                "tra chính xác nhé."
+            ),
+        )
+
+        rendered = ConversationPresenter.with_cta(reply, result)
+
+        self.assertEqual(rendered, reply)
+        self.assertEqual(rendered.casefold().count("mã sản phẩm"), 1)
+
     def test_presenter_normalizes_customer_address(self):
         reply = "Chào bạn. Quý khách đang quan tâm sản phẩm nào ạ?"
 
@@ -357,11 +480,80 @@ class ConversationTests(unittest.TestCase):
             requested_attributes=["sizes"],
         )
 
+        plan.use_knowledge = True
+        plan.knowledge_query = "Chọn size theo bàn chân dài 25cm"
+        plan.knowledge_categories = ["size_guide"]
         result = executor.execute("Chan dai 25cm mang size nao?", plan, context)
 
         self.assertEqual(result.status, "product_found")
         self.assertIn("25cm", result.knowledge_context)
         self.assertEqual(result.sources[0]["source_key"], "size_guide/test.txt")
+
+    def test_size_advice_targets_size_guide_category(self):
+        received = {}
+
+        def fake_size_knowledge(question, *, categories=None):
+            received["question"] = question
+            received["categories"] = categories
+            return {
+                "success": True,
+                "status": "knowledge_found",
+                "content": "Bảng quy đổi size theo chiều dài bàn chân.",
+                "sources": [{"source_key": "size_guide/test.txt"}],
+            }
+
+        executor = ConversationExecutor(
+            products=FakeRepository(),
+            knowledge_search=fake_size_knowledge,
+        )
+        context = ConversationContext(
+            session_id="size-category",
+            channel="web",
+            latest_product_code="G81V6",
+        )
+        plan = ConversationPlan(
+            intent=ConversationIntent.PRODUCT_INFORMATION,
+            reference_product_code="G81V6",
+            requested_attributes=["sizes"],
+        )
+
+        plan.use_knowledge = True
+        plan.knowledge_query = "Chọn size theo bàn chân dài 25cm"
+        plan.knowledge_categories = ["size_guide"]
+        result = executor.execute("Chân 25cm mang size nào?", plan, context)
+
+        self.assertEqual(received["categories"], ["size_guide"])
+        self.assertTrue(result.knowledge_context)
+
+    def test_planner_uses_semantic_ai_knowledge_decision(self):
+        class SizeAdviceAI:
+            def create_plan(self, message, context):
+                return ConversationPlan(
+                    intent=ConversationIntent.PRODUCT_INFORMATION,
+                    reference_product_code="GRD70",
+                    requested_size=None,
+                    buying_intent=False,
+                    requested_attributes=["sizes"],
+                    use_knowledge=True,
+                    knowledge_query=(
+                        "Quy đổi size 43 sang chiều dài bàn chân cho giày nam"
+                    ),
+                    knowledge_categories=["size_guide"],
+                )
+
+        planner = ConversationPlanner(SizeAdviceAI())
+        context = ConversationContext(
+            session_id="size-not-order",
+            channel="web",
+            latest_product_code="GRD70",
+        )
+
+        plan = planner.plan("Size 43 thì chân dài bao nhiêu cm?", context)
+
+        self.assertIsNone(plan.requested_size)
+        self.assertFalse(plan.buying_intent)
+        self.assertTrue(plan.use_knowledge)
+        self.assertEqual(plan.knowledge_categories, ["size_guide"])
 
     def test_promotion_order_question_uses_knowledge_and_keeps_order_draft(self):
         def fake_promotion_knowledge(question):
@@ -399,6 +591,7 @@ class ConversationTests(unittest.TestCase):
             intent=ConversationIntent.PRODUCT_INFORMATION,
             reference_product_code="G81V6",
             requested_attributes=["promotion"],
+            promotion_action="recommend",
         )
 
         result = executor.execute(
@@ -413,10 +606,12 @@ class ConversationTests(unittest.TestCase):
             result.facts["order_draft"]["subtotal"],
             850_000,
         )
-        self.assertIn(
-            "200.000",
-            result.facts["order_draft"]["promotion_note"],
+        self.assertIsNone(result.facts["order_draft"]["promotion_note"])
+        self.assertEqual(
+            result.facts["order_draft"]["promotion_discount_amount"],
+            0,
         )
+        self.assertIn("promotion_recommendation", result.facts)
 
     def test_structured_promotion_is_saved_and_reduces_draft_total(self):
         context = ConversationContext(
@@ -446,6 +641,7 @@ class ConversationTests(unittest.TestCase):
             promotion_name="Ưu đãi Sinh nhật tháng 08",
             promotion_discount_amount=200_000,
             promotion_eligible=True,
+            promotion_action="apply",
         )
         result = ExecutionResult(
             success=True,
@@ -462,6 +658,100 @@ class ConversationTests(unittest.TestCase):
         self.assertEqual(draft["total"], 680_000)
         self.assertIn("Ưu đãi Sinh nhật tháng 08", draft["promotion_note"])
         self.assertIn("200.000 đ", draft["promotion_note"])
+        self.assertNotIn("AI tạm tính", draft["promotion_note"])
+
+    def test_promotion_recommendation_does_not_change_order_total(self):
+        context = ConversationContext(
+            session_id="promotion-recommendation",
+            channel="web",
+            latest_product_code="G81V6",
+            sales_stage=SalesStage.AWAITING_FINAL_CONFIRMATION,
+            draft_product_code="G81V6",
+            draft_color="Đen",
+            draft_size="36",
+            draft_quantity=1,
+            draft_payment_method="cod",
+            cart_items=[{
+                "product_name": "Giày cao gót Đông Hải",
+                "product_code": "G81V6",
+                "color": "Đen",
+                "size": "36",
+                "quantity": 1,
+                "unit_price": 850_000,
+                "subtotal": 850_000,
+            }],
+        )
+        plan = ConversationPlan(
+            intent=ConversationIntent.PRODUCT_INFORMATION,
+            reference_product_code="G81V6",
+            requested_attributes=["promotion"],
+            promotion_action="recommend",
+            promotion_name="Ưu đãi Sinh nhật tháng 08",
+            promotion_discount_amount=100_000,
+            promotion_benefit="Voucher 100.000 đ dùng lần sau",
+            promotion_eligible=True,
+        )
+        result = ExecutionResult(
+            success=True,
+            status="product_found",
+            intent=ConversationIntent.PRODUCT_INFORMATION,
+            products=[FakeRepository().public_info("G81V6")],
+        )
+
+        OrderFlowService().apply(plan, result, context)
+        CTAService().apply(plan, result, context)
+
+        draft = result.facts["order_draft"]
+        self.assertEqual(draft["promotion_discount_amount"], 0)
+        self.assertEqual(draft["total"], 880_000)
+        self.assertIsNone(draft["promotion_note"])
+        self.assertEqual(result.cta_type, CTAType.APPLY_PROMOTION)
+
+    def test_remove_promotion_restores_original_total(self):
+        context = ConversationContext(
+            session_id="promotion-remove",
+            channel="web",
+            latest_product_code="G81V6",
+            sales_stage=SalesStage.AWAITING_FINAL_CONFIRMATION,
+            draft_product_code="G81V6",
+            draft_color="Đen",
+            draft_size="36",
+            draft_quantity=1,
+            draft_payment_method="cod",
+            draft_promotion_name="Ưu đãi Sinh nhật tháng 08",
+            draft_promotion_discount_amount=100_000,
+            draft_promotion_eligible=True,
+            draft_promotion_note="Chương trình: Ưu đãi Sinh nhật tháng 08",
+            cart_items=[{
+                "product_name": "Giày cao gót Đông Hải",
+                "product_code": "G81V6",
+                "color": "Đen",
+                "size": "36",
+                "quantity": 1,
+                "unit_price": 850_000,
+                "subtotal": 850_000,
+            }],
+        )
+        plan = ConversationPlan(
+            intent=ConversationIntent.PRODUCT_INFORMATION,
+            reference_product_code="G81V6",
+            requested_attributes=["promotion"],
+            promotion_action="remove",
+        )
+        result = ExecutionResult(
+            success=True,
+            status="product_found",
+            intent=ConversationIntent.PRODUCT_INFORMATION,
+            products=[FakeRepository().public_info("G81V6")],
+        )
+
+        OrderFlowService().apply(plan, result, context)
+
+        draft = result.facts["order_draft"]
+        self.assertTrue(result.facts["promotion_removed"])
+        self.assertEqual(draft["promotion_discount_amount"], 0)
+        self.assertEqual(draft["total"], 880_000)
+        self.assertIsNone(draft["promotion_note"])
 
     def test_contextual_cta_does_not_repeat_recent_wording(self):
         first = self.service.chat(
@@ -581,6 +871,69 @@ class ConversationTests(unittest.TestCase):
 
         self.assertNotIn(result.cta_type, {CTAType.ASK_SIZE, CTAType.SIZE_SUPPORT})
 
+    def test_incomplete_product_is_kept_when_customer_adds_another_product(self):
+        flow = OrderFlowService()
+        context = ConversationContext(session_id="pending-cart", channel="web")
+
+        first_plan = ConversationPlan(
+            intent=ConversationIntent.PRODUCT_INFORMATION,
+            reference_product_code="PK01",
+            requested_color="Đen",
+            buying_intent=True,
+        )
+        first_result = ExecutionResult(
+            success=True,
+            status="product_found",
+            intent=first_plan.intent,
+            products=[ACCESSORY_PRODUCT.copy()],
+        )
+        flow.apply(first_plan, first_result, context)
+
+        self.assertEqual(context.pending_items[0]["product_code"], "PK01")
+        self.assertIn("quantity", context.pending_items[0]["missing_fields"])
+
+        second_plan = ConversationPlan(
+            intent=ConversationIntent.PRODUCT_INFORMATION,
+            reference_product_code="PK02",
+            requested_color="Nâu",
+            requested_quantity=1,
+            buying_intent=True,
+            order_action="add_item",
+        )
+        second_result = ExecutionResult(
+            success=True,
+            status="product_found",
+            intent=second_plan.intent,
+            products=[SECOND_ACCESSORY_PRODUCT.copy()],
+        )
+        flow.apply(second_plan, second_result, context)
+
+        self.assertEqual([item["product_code"] for item in context.cart_items], ["PK02"])
+        self.assertEqual(context.draft_product_code, "PK01")
+        self.assertEqual(context.sales_stage, SalesStage.COLLECTING_PRODUCT)
+        self.assertIn("quantity", second_result.facts["missing_product_fields"])
+
+        finish_first_plan = ConversationPlan(
+            intent=ConversationIntent.PRODUCT_INFORMATION,
+            reference_product_code="PK01",
+            requested_quantity=1,
+            buying_intent=True,
+        )
+        finish_first_result = ExecutionResult(
+            success=True,
+            status="product_found",
+            intent=finish_first_plan.intent,
+            products=[ACCESSORY_PRODUCT.copy()],
+        )
+        flow.apply(finish_first_plan, finish_first_result, context)
+
+        self.assertEqual(context.pending_items, [])
+        self.assertEqual(
+            {item["product_code"] for item in context.cart_items},
+            {"PK01", "PK02"},
+        )
+        self.assertEqual(context.sales_stage, SalesStage.COLLECTING_CONTACT)
+
     def test_quantity_is_not_inferred_when_customer_did_not_say_it(self):
         class HallucinatedQuantityAI(FakeAI):
             def create_plan(self, message, context):
@@ -600,24 +953,332 @@ class ConversationTests(unittest.TestCase):
         self.assertIsNone(plan.requested_quantity)
 
     def test_quantity_accepts_piece_unit_for_accessories(self):
-        plan = ConversationPlanner(FakeAI()).plan(
+        class SemanticQuantityAI(FakeAI):
+            def create_plan(self, message, context):
+                return ConversationPlan(
+                    intent=ConversationIntent.PRODUCT_INFORMATION,
+                    requested_quantity=1,
+                    quantity_explicitly_provided=True,
+                    buying_intent=True,
+                )
+
+        plan = ConversationPlanner(SemanticQuantityAI()).plan(
             "Cho anh 1 chiếc",
             ConversationContext(session_id="piece-quantity", channel="web"),
         )
 
         self.assertEqual(plan.requested_quantity, 1)
 
+    def test_quantity_unit_in_customer_message_recovers_missing_ai_flag(self):
+        class MissingQuantityFlagAI(FakeAI):
+            def create_plan(self, message, context):
+                return ConversationPlan(
+                    intent=ConversationIntent.PRODUCT_INFORMATION,
+                    requested_color="Đen",
+                    requested_size="39",
+                    requested_quantity=1,
+                    quantity_explicitly_provided=False,
+                    buying_intent=True,
+                )
+
+        plan = ConversationPlanner(MissingQuantityFlagAI()).plan(
+            "Cho màu đen 1 đôi nhé",
+            ConversationContext(
+                session_id="quantity-unit-fallback",
+                channel="web",
+                sales_stage=SalesStage.COLLECTING_PRODUCT,
+                draft_product_code="GSD03",
+                draft_size="39",
+            ),
+        )
+
+        self.assertEqual(plan.requested_quantity, 1)
+        self.assertTrue(plan.quantity_explicitly_provided)
+
+    def test_bare_number_is_quantity_when_order_is_waiting_for_quantity(self):
+        class ContextualQuantityAI(FakeAI):
+            def create_plan(self, message, context):
+                return ConversationPlan(
+                    intent=ConversationIntent.PRODUCT_INFORMATION,
+                    requested_quantity=(
+                        2 if message.strip().startswith("2") else 1
+                    ),
+                    quantity_explicitly_provided=True,
+                    buying_intent=True,
+                )
+
+        context = ConversationContext(
+            session_id="bare-quantity",
+            channel="web",
+            sales_stage=SalesStage.COLLECTING_PRODUCT,
+            draft_product_code="G2295",
+            draft_color="Đen",
+            draft_size="43",
+        )
+
+        for message in ("1", "1 e", "2 ạ"):
+            with self.subTest(message=message):
+                plan = ConversationPlanner(ContextualQuantityAI()).plan(message, context)
+                self.assertEqual(
+                    plan.requested_quantity,
+                    2 if message.startswith("2") else 1,
+                )
+
+    def test_bare_number_is_not_quantity_while_browsing(self):
+        plan = ConversationPlanner(FakeAI()).plan(
+            "1",
+            ConversationContext(session_id="bare-browsing", channel="web"),
+        )
+
+        self.assertIsNone(plan.requested_quantity)
+
+    def test_bare_size_is_not_reused_as_quantity_when_size_is_missing(self):
+        class SizeAndQuantityConfusedAI(FakeAI):
+            def create_plan(self, message, context):
+                return ConversationPlan(
+                    intent=ConversationIntent.PRODUCT_INFORMATION,
+                    requested_size="39",
+                    requested_quantity=39,
+                    quantity_explicitly_provided=False,
+                    buying_intent=True,
+                )
+
+        plan = ConversationPlanner(SizeAndQuantityConfusedAI()).plan(
+            "39",
+            ConversationContext(
+                session_id="bare-size-not-quantity",
+                channel="facebook",
+                sales_stage=SalesStage.COLLECTING_PRODUCT,
+                draft_product_code="GCF94",
+                draft_color="Đen",
+                draft_size=None,
+                draft_quantity=None,
+            ),
+        )
+
+        self.assertEqual(plan.requested_size, "39")
+        self.assertIsNone(plan.requested_quantity)
+        self.assertFalse(plan.quantity_explicitly_provided)
+
+    def test_recommended_product_replaces_unavailable_pending_variant(self):
+        flow = OrderFlowService()
+        new_product = {
+            **PRODUCT,
+            "product_code": "GCF94",
+            "product_name": "Giày cao gót thay thế",
+            "available_sizes": ["39"],
+            "availability_by_color": {
+                "Đen": {"available": True, "available_sizes": ["39"]},
+            },
+            "variant_prices": [{
+                "color": "Đen",
+                "size": "39",
+                "price": 2350000,
+                "available": True,
+            }],
+            "prices": [2350000],
+        }
+        context = ConversationContext(
+            session_id="replace-unavailable",
+            channel="facebook",
+            sales_stage=SalesStage.COLLECTING_PRODUCT,
+            draft_product_code="GSD03",
+            draft_color="Nâu",
+            draft_size="39",
+            draft_quantity=1,
+            pending_items=[{
+                "product_code": "GSD03",
+                "color": "Nâu",
+                "size": "39",
+                "quantity": 1,
+                "missing_fields": ["size_unavailable_for_color"],
+            }],
+            recently_recommended_codes=["GCF94"],
+        )
+        plan = ConversationPlan(
+            intent=ConversationIntent.PRODUCT_INFORMATION,
+            reference_product_code="GCF94",
+            requested_color="Đen",
+            requested_size="39",
+            requested_quantity=1,
+            quantity_explicitly_provided=True,
+            buying_intent=True,
+        )
+        result = ExecutionResult(
+            success=True,
+            status="product_found",
+            intent=plan.intent,
+            products=[new_product],
+        )
+
+        flow.apply(plan, result, context)
+
+        self.assertEqual(context.pending_items, [])
+        self.assertEqual(context.draft_product_code, "GCF94")
+        self.assertEqual(context.draft_quantity, 1)
+        self.assertEqual(
+            [item["product_code"] for item in context.cart_items],
+            ["GCF94"],
+        )
+
+    def test_current_product_purchase_is_not_treated_as_recommendation(self):
+        class MisclassifiedPurchaseAI(FakeAI):
+            def create_plan(self, message, context):
+                return ConversationPlan(
+                    intent=ConversationIntent.PRODUCT_RECOMMENDATION,
+                    reference_product_code="JC59",
+                    requested_color="Đen",
+                    requested_items=[RequestedOrderItem(
+                        product_code="JC59",
+                        color="Đen",
+                        quantity=1,
+                    )],
+                    buying_intent=True,
+                    send_images=True,
+                )
+
+        plan = ConversationPlanner(MisclassifiedPurchaseAI()).plan(
+            "Lấy anh 1 cái màu đen",
+            ConversationContext(
+                session_id="current-product-purchase",
+                channel="web",
+                latest_product_code="JC59",
+            ),
+        )
+
+        self.assertEqual(plan.intent, ConversationIntent.PRODUCT_INFORMATION)
+        self.assertFalse(plan.send_images)
+        self.assertEqual(plan.reference_product_code, "JC59")
+        self.assertEqual(plan.requested_items[0].quantity, 1)
+
+    def test_purchase_with_explicit_image_request_keeps_media_signal(self):
+        class PurchaseWithImageAI(FakeAI):
+            def create_plan(self, message, context):
+                return ConversationPlan(
+                    intent=ConversationIntent.PRODUCT_RECOMMENDATION,
+                    reference_product_code="JC59",
+                    requested_color="Đen",
+                    requested_items=[RequestedOrderItem(
+                        product_code="JC59",
+                        color="Đen",
+                        quantity=1,
+                    )],
+                    buying_intent=True,
+                    send_images=True,
+                    explicit_image_request=True,
+                )
+
+        plan = ConversationPlanner(PurchaseWithImageAI()).plan(
+            "Lấy một cái màu đen và cho anh xem ảnh",
+            ConversationContext(
+                session_id="purchase-with-image",
+                channel="web",
+                latest_product_code="JC59",
+            ),
+        )
+
+        self.assertEqual(plan.intent, ConversationIntent.PRODUCT_INFORMATION)
+        self.assertTrue(plan.explicit_image_request)
+        self.assertTrue(plan.send_images)
+
+    def test_selecting_exact_code_does_not_repeat_category_recommendations(self):
+        class MisclassifiedSelectionAI(FakeAI):
+            def create_plan(self, message, context):
+                return ConversationPlan(
+                    intent=ConversationIntent.PRODUCT_SEARCH,
+                    reference_product_code="G01D1",
+                    search_query="giay tay",
+                    send_images=True,
+                )
+
+        plan = ConversationPlanner(MisclassifiedSelectionAI()).plan(
+            "Cho anh xem G01D1",
+            ConversationContext(
+                session_id="select-recommended-product",
+                channel="web",
+                latest_product_code="GRD70",
+                recently_recommended_codes=["GRD70", "G2295", "G01D1"],
+            ),
+        )
+
+        self.assertEqual(plan.intent, ConversationIntent.PRODUCT_INFORMATION)
+        self.assertEqual(plan.reference_product_code, "G01D1")
+        self.assertIsNone(plan.search_query)
+        self.assertTrue(plan.send_images)
+
+    def test_bare_sku_is_promoted_to_exact_product_reference(self):
+        class BareSkuAsQueryAI(FakeAI):
+            def create_plan(self, message, context):
+                return ConversationPlan(
+                    intent=ConversationIntent.PRODUCT_SEARCH,
+                    search_query="S81V3",
+                    suggested_cta_type=CTAType.PROVIDE_MORE_INFO,
+                )
+
+        plan = ConversationPlanner(BareSkuAsQueryAI()).plan(
+            "S81V3",
+            ConversationContext(session_id="bare-sku", channel="web"),
+        )
+
+        self.assertEqual(plan.intent, ConversationIntent.PRODUCT_INFORMATION)
+        self.assertEqual(plan.reference_product_code, "S81V3")
+        self.assertIsNone(plan.search_query)
+        self.assertTrue(plan.send_images)
+
+    def test_name_and_phone_at_contact_stage_are_not_product_code(self):
+        class ContactMisclassifiedAsProductAI(FakeAI):
+            def create_plan(self, message, context):
+                return ConversationPlan(
+                    intent=ConversationIntent.PRODUCT_INFORMATION,
+                    reference_product_code="TRANG0764897432",
+                    search_query="TRANG0764897432",
+                    customer_phone="0764897432",
+                    buying_intent=True,
+                    send_images=True,
+                )
+
+        context = ConversationContext(
+            session_id="contact-not-product",
+            channel="telegram",
+            sales_stage=SalesStage.COLLECTING_CONTACT,
+            latest_product_code="S81Q8",
+            draft_product_code="S81Q8",
+            draft_color="Xanh Lá",
+            draft_size="38",
+            draft_quantity=2,
+            cart_items=[{
+                "product_code": "S81Q8",
+                "color": "Xanh Lá",
+                "size": "38",
+                "quantity": 2,
+            }],
+        )
+
+        plan = ConversationPlanner(ContactMisclassifiedAsProductAI()).plan(
+            "Trang 0764897432",
+            context,
+        )
+
+        self.assertEqual(plan.customer_name, "Trang")
+        self.assertEqual(plan.customer_phone, "0764897432")
+        self.assertEqual(plan.reference_product_code, "S81Q8")
+        self.assertIsNone(plan.search_query)
+        self.assertEqual(plan.requested_items, [])
+        self.assertFalse(plan.send_images)
+
     def test_explicit_quantity_is_kept(self):
-        class MissingQuantityAI(FakeAI):
+        class ExplicitQuantityAI(FakeAI):
             def create_plan(self, message, context):
                 return ConversationPlan(
                     intent=ConversationIntent.PRODUCT_INFORMATION,
                     requested_color="Den",
                     requested_size="37",
+                    requested_quantity=2,
+                    quantity_explicitly_provided=True,
                     buying_intent=True,
                 )
 
-        plan = ConversationPlanner(MissingQuantityAI()).plan(
+        plan = ConversationPlanner(ExplicitQuantityAI()).plan(
             "Cho anh size 37 mau den 2 doi",
             ConversationContext(session_id="with-quantity", channel="web"),
         )
@@ -716,6 +1377,7 @@ class ConversationTests(unittest.TestCase):
                     requested_color="Đen",
                     requested_size="36",
                     requested_quantity=1,
+                    quantity_explicitly_provided=True,
                     buying_intent=True,
                     suggested_cta_type=CTAType.CONFIRM_ORDER,
                     suggested_cta_index=0,
@@ -957,6 +1619,114 @@ class ConversationTests(unittest.TestCase):
         self.assertEqual(order["items"][0]["color"], "Nâu")
         self.assertEqual(order["items"][0]["size"], "36")
         self.assertEqual(order["subtotal"], 2_350_000)
+
+    def test_change_to_each_color_keeps_old_variant_when_requested(self):
+        product = {
+            **PRODUCT,
+            "product_code": "S81V3",
+            "product_name": "Sandal S81V3",
+            "colors": ["Đen", "Bò"],
+            "available_sizes": ["37"],
+            "prices": [890_000],
+            "variant_prices": [],
+        }
+        black_item = {
+            "product_code": "S81V3",
+            "product_name": "Sandal S81V3",
+            "color": "Đen",
+            "size": "37",
+            "quantity": 1,
+            "unit_price": 890_000,
+            "subtotal": 890_000,
+        }
+        context = ConversationContext(
+            session_id="change-to-each-color",
+            channel="web",
+            sales_stage=SalesStage.COLLECTING_PRODUCT,
+            draft_product_code="S81V3",
+            draft_color="Đen",
+            draft_size="37",
+            draft_quantity=1,
+            cart_items=[black_item],
+        )
+        plan = ConversationPlan(
+            intent=ConversationIntent.PRODUCT_INFORMATION,
+            reference_product_code="S81V3",
+            buying_intent=True,
+            order_action="change",
+            requested_items=[
+                RequestedOrderItem(
+                    product_code="S81V3", color="Đen", size="37", quantity=1,
+                ),
+                RequestedOrderItem(
+                    product_code="S81V3", color="Bò", size="37", quantity=1,
+                ),
+            ],
+        )
+        result = ExecutionResult(
+            success=True,
+            status="product_found",
+            intent=ConversationIntent.PRODUCT_INFORMATION,
+            products=[product],
+        )
+
+        OrderFlowService().apply(plan, result, context)
+
+        order = result.facts["order_draft"]
+        self.assertEqual(len(order["items"]), 2)
+        self.assertEqual(
+            {(item["color"], item["quantity"]) for item in order["items"]},
+            {("Đen", 1), ("Bò", 1)},
+        )
+        self.assertEqual(order["subtotal"], 1_780_000)
+        CTAService().apply(plan, result, context)
+        self.assertEqual(result.cta_type, CTAType.PROVIDE_CONTACT)
+
+    def test_presenter_removes_ai_generated_cta_before_backend_cta(self):
+        result = ExecutionResult(
+            success=True,
+            status="order_flow_updated",
+            intent=ConversationIntent.PRODUCT_INFORMATION,
+            cta_type=CTAType.PROVIDE_CONTACT,
+            cta_text="Anh/chị cho em xin họ tên và số điện thoại ạ.",
+        )
+        reply = (
+            "Dạ, em đã ghi nhận mỗi màu một đôi ạ ❤️  "
+            "Anh/chị cho em xin thông tin nhận hàng để em ghi nhận tiếp ạ."
+        )
+
+        presented = ConversationPresenter.with_cta(reply, result)
+
+        self.assertEqual(
+            presented,
+            "Dạ, em đã ghi nhận mỗi màu một đôi ạ ❤️\n\n"
+            "Anh/chị cho em xin họ tên và số điện thoại ạ.",
+        )
+
+    def test_presenter_removes_duplicate_cta_after_normal_sentence(self):
+        result = ExecutionResult(
+            success=False,
+            status="products_not_found",
+            intent=ConversationIntent.PRODUCT_SEARCH,
+            cta_type=CTAType.PROVIDE_MORE_INFO,
+            cta_text=(
+                "Anh/chị cho em thêm mã hoặc loại sản phẩm đang tìm "
+                "để em hỗ trợ tiếp ạ."
+            ),
+        )
+        reply = (
+            "Dạ, em chưa tìm thấy sản phẩm với mã anh/chị vừa cung cấp ạ. "
+            "Anh/chị cho em xin thêm mã hoặc loại sản phẩm đang tìm nhé."
+        )
+
+        presented = ConversationPresenter.with_cta(reply, result)
+
+        self.assertEqual(
+            presented,
+            "Dạ, em chưa tìm thấy sản phẩm với mã anh/chị vừa cung cấp ạ.\n\n"
+            "Anh/chị cho em thêm mã hoặc loại sản phẩm đang tìm "
+            "để em hỗ trợ tiếp ạ.",
+        )
 
     def test_explicit_product_category_resolves_from_database_taxonomy(self):
         product_type = ProductRepository.match_product_type(

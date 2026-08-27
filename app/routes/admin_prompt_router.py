@@ -20,6 +20,7 @@ PROMPT_FILES = {
     "product_reply.txt": "Trả lời nhận diện ảnh",
     "cta_templates.txt": "Câu CTA",
     "fast_responses.txt": "Câu trả lời nhanh",
+    "human_handoff_reply.txt": "Thông báo chuyển nhân viên",
     "promotion_rules.txt": "Chương trình khuyến mãi",
 }
 
@@ -60,6 +61,11 @@ def _apply_runtime(request: Request, name: str, content: str) -> None:
         parsed = parse_cta_templates(content, name)
         CTA_TEMPLATES.clear()
         CTA_TEMPLATES.update(parsed)
+    elif name == "human_handoff_reply.txt":
+        if conversation:
+            conversation.presenter.human_handoff_reply = content.strip()
+        if image_service:
+            image_service.presenter.human_handoff_reply = content.strip()
 
 
 @router.get("", response_class=HTMLResponse)

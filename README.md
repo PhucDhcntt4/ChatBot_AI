@@ -118,3 +118,23 @@ Luồng xử lý: Gemini phân loại và tìm vùng sản phẩm → crop → C
 pgvector lấy ứng viên → Gemini xác minh → PostgreSQL lấy thông tin chính thức →
 Presenter viết câu trả lời. Mã nhận diện được được lưu vào context để khách có thể
 hỏi tiếp về màu, size, chất liệu hoặc yêu cầu ảnh bằng endpoint text.
+# Cấu hình AI và RAG
+
+Model hội thoại/vision và model embedding tài liệu là hai cấu hình độc lập.
+Đổi `AI_PROVIDER` không nên tự động đổi RAG nếu database đang chứa vector
+của model cũ.
+
+Ví dụ dùng OpenAI cho chat và vision, giữ Gemini cho knowledge đã đồng bộ:
+
+```env
+AI_PROVIDER=openai
+OPENAI_MODEL=gpt-4.1-mini
+
+RAG_EMBEDDING_PROVIDER=gemini
+RAG_EMBEDDING_MODEL=gemini-embedding-001
+RAG_EMBEDDING_DIMENSION=768
+```
+
+Chỉ đặt `RAG_EMBEDDING_PROVIDER=openai` sau khi đã import lại tài liệu bằng
+OpenAI embedding. Provider, model và dimension của query phải giống dữ liệu
+đang lưu trong `knowledge_documents`.

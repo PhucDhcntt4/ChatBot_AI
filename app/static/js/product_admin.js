@@ -1,5 +1,6 @@
 const $ = (id) => document.getElementById(id);
 let timer = null,
+  statusHideTimer = null,
   lastStatus = "",
   catalogPage = 1,
   catalogPages = 1;
@@ -12,7 +13,16 @@ const catalogPageSize = 20,
 function setBusy(v) {
   $("skuButton").disabled = v;
   $("excelButton").disabled = v;
-  $("statusCard").hidden = false;
+  if (v) {
+    clearTimeout(statusHideTimer);
+    $("statusCard").hidden = false;
+  }
+}
+function hideFinishedStatus(delay = 6000) {
+  clearTimeout(statusHideTimer);
+  statusHideTimer = setTimeout(() => {
+    $("statusCard").hidden = true;
+  }, delay);
 }
 function toast(title, message, error = false) {
   const el = document.createElement("div");
@@ -60,7 +70,7 @@ async function poll(id) {
   try {
     const j = await asJson(await fetch(`/admin/products/api/jobs/${id}`));
     render(j);
-    if (["queued", "running"].includes(j.status))
+    if (["queued", "claimed", "running"].includes(j.status))
       timer = setTimeout(() => poll(id), 1000);
     else {
       setBusy(false);
@@ -74,6 +84,7 @@ async function poll(id) {
             : `Đã đồng bộ thành công ${j.succeeded} SKU.`,
           !!j.failed,
         );
+      hideFinishedStatus();
     }
     lastStatus = j.status;
   } catch (e) {
@@ -82,7 +93,7 @@ async function poll(id) {
   }
 }
 function render(j) {
-  const running = ["queued", "running"].includes(j.status);
+  const running = ["queued", "claimed", "running"].includes(j.status);
   const pct = Math.min(
     100,
     Math.round(
@@ -253,9 +264,11 @@ $("catalogNext").onclick = () => {
 loadCatalog();
 
 // ---- Trợ lý đồng bộ (chatbot) ----
+if (!window.DongHaiSharedChat) {
 let chatBusy = false;
 let chatHistory = [];
 let activeProductCodes = [];
+const CHAT_TRANSCRIPT_PREFIX = "dong_hai_chat_transcript:";
 const CHAT_GREETING = "👋 Xin chào anh/chị! Em là trợ lý AI của Đông Hải. Anh/chị cần em hỗ trợ gì ạ?";
 function getChatSessionId() {
   let sessionId = localStorage.getItem("dong_hai_chat_session");
@@ -264,6 +277,35 @@ function getChatSessionId() {
     localStorage.setItem("dong_hai_chat_session", sessionId);
   }
   return sessionId;
+}
+function getChatTranscriptKey(sessionId = getChatSessionId()) {
+  return `${CHAT_TRANSCRIPT_PREFIX}${sessionId}`;
+}
+function loadChatTranscript() {
+  try {
+    const value = JSON.parse(
+      localStorage.getItem(getChatTranscriptKey()) || "[]",
+    );
+    return Array.isArray(value) ? value : [];
+  } catch (error) {
+    console.warn("Không thể đọc lịch sử chat trên trình duyệt:", error);
+    return [];
+  }
+}
+function saveChatTranscript(items) {
+  try {
+    localStorage.setItem(
+      getChatTranscriptKey(),
+      JSON.stringify(items.slice(-60)),
+    );
+  } catch (error) {
+    console.warn("Không thể lưu lịch sử chat trên trình duyệt:", error);
+  }
+}
+function appendChatTranscript(item) {
+  const items = loadChatTranscript();
+  items.push(item);
+  saveChatTranscript(items);
 }
 function rememberChat(role, content) {
   if (!content) return;
@@ -330,12 +372,15 @@ $("chatImage").onchange = () => {
   const file = $("chatImage").files[0];
   if (file) sendChatImage(file);
 };
-function addMsg(text, who) {
+function addMsg(text, who, persist = true) {
   const el = document.createElement("div");
   el.className = `ck-msg ${who}`;
   el.textContent = text;
   $("chatBody").appendChild(el);
   $("chatBody").scrollTop = $("chatBody").scrollHeight;
+  if (persist && text) {
+    appendChatTranscript({ type: "message", who, text });
+  }
   return el;
 }
 function addUserImage(file) {
@@ -349,6 +394,11 @@ function addUserImage(file) {
   wrapper.appendChild(image);
   $("chatBody").appendChild(wrapper);
   $("chatBody").scrollTop = $("chatBody").scrollHeight;
+  appendChatTranscript({
+    type: "message",
+    who: "user",
+    text: "📷 Ảnh sản phẩm đã gửi",
+  });
 }
 function showLightboxImage(index) {
   if (!lightboxUrls.length) return;
@@ -396,10 +446,16 @@ $("chatBody").addEventListener("click", (event) => {
   const productName = image.alt.replace(/, ảnh \d+$/, "") || "Sản phẩm";
   openLightbox(urls, index, productName);
 });
-function addProductAlbums(products) {
+function addProductAlbums(products, persist = true) {
+  const persistedProducts = [];
   (products || []).forEach((product) => {
     const urls = (product.image_urls || []).slice(0, 4);
     if (!urls.length) return;
+    persistedProducts.push({
+      product_code: product.product_code,
+      product_name: product.product_name,
+      image_urls: urls,
+    });
     const album = document.createElement("div");
     album.className = `ck-product-album count-${urls.length}${urls.length === 1 ? " single" : ""}`;
     const productName =
@@ -445,6 +501,34 @@ function addProductAlbums(products) {
     });
     $("chatBody").appendChild(album);
   });
+  if (persist && persistedProducts.length) {
+    appendChatTranscript({
+      type: "albums",
+      products: persistedProducts,
+    });
+  }
+  $("chatBody").scrollTop = $("chatBody").scrollHeight;
+}
+function restoreChatTranscript() {
+  const items = loadChatTranscript();
+  if (!items.length) return;
+
+  chatHistory = [];
+  $("chatBody").replaceChildren();
+  items.forEach((item) => {
+    if (item.type === "message" && item.text) {
+      addMsg(item.text, item.who === "user" ? "user" : "bot", false);
+      rememberChat(
+        item.who === "user" ? "user" : "assistant",
+        item.text,
+      );
+    } else if (item.type === "albums" && Array.isArray(item.products)) {
+      addProductAlbums(item.products, false);
+      rememberActiveProducts(
+        item.products.map((product) => product.product_code),
+      );
+    }
+  });
   $("chatBody").scrollTop = $("chatBody").scrollHeight;
 }
 function setChatBusy(busy) {
@@ -469,6 +553,7 @@ async function resetChatConversation() {
     });
     if (!response.ok) throw new Error("Không thể reset hội thoại");
 
+    localStorage.removeItem(getChatTranscriptKey(oldSessionId));
     localStorage.setItem("dong_hai_chat_session", crypto.randomUUID());
     chatHistory = [];
     activeProductCodes = [];
@@ -602,4 +687,7 @@ async function sendChatImage(file) {
     $("chatImage").value = "";
     setChatBusy(false);
   }
+}
+
+restoreChatTranscript();
 }

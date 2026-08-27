@@ -1,0 +1,594 @@
+DỰ ÁN ĐÔNG HẢI BOT CONVERSATION V2
+=================================
+
+Tài liệu này mô tả trạng thái source hiện tại, cách chạy trên Windows và định
+hướng triển khai production. Tài liệu được lưu bằng UTF-8.
+
+
+1. MỤC TIÊU VÀ PHẠM VI
+======================
+
+BOT_Conversation_V2 là chatbot tư vấn sản phẩm và hỗ trợ lập đơn nháp cho Đông
+Hải. Một bộ nghiệp vụ hội thoại được dùng chung cho Web và Telegram.
+
+Hệ thống hiện hỗ trợ:
+
+- Tìm sản phẩm theo mã, tên, từ khóa và loại sản phẩm.
+- Gợi ý nhiều sản phẩm cùng nhu cầu và gửi album ảnh CDN Shopify.
+- Trả lời giá, màu, size, chất liệu, đế, chiều cao và mô tả sản phẩm.
+- Nhận diện mã sản phẩm từ ảnh khách gửi.
+- Trả lời chính sách bằng RAG: cửa hàng, đổi trả, bảo hành, vận chuyển, size,
+  khuyến mãi và các tài liệu chăm sóc khách hàng.
+- Ghi nhớ hội thoại, sản phẩm gần nhất, giỏ hàng và đơn nháp.
+- Xử lý nhiều sản phẩm, nhiều màu/size/số lượng trong một đơn.
+- Thu thập họ tên, số điện thoại, địa chỉ và phương thức thanh toán.
+- Tạm tính tiền sản phẩm, ưu đãi, phí vận chuyển và tổng thanh toán.
+- Chờ khách xác nhận rồi xuất đơn nháp sang Google Sheets.
+- Quản trị sản phẩm, Knowledge, Prompt và phiên hội thoại trên giao diện Admin.
+- Đồng bộ sản phẩm và tạo image embedding bằng worker chạy độc lập với FastAPI.
+
+Hệ thống chưa tạo đơn thật trên Shopify. Google Sheets hiện là nơi nhân viên
+kiểm tra và tiếp tục xử lý đơn.
+
+
+2. KIẾN TRÚC TỔNG QUAN
+======================
+
+Web/Telegram
+    -> Channel Provider
+    -> Channel Dispatcher
+    -> ConversationService hoặc ProductImageConversationService
+    -> Planner AI
+    -> Executor + OrderFlow
+    -> PostgreSQL / RAG / Vector Search
+    -> CTA Service
+    -> Presenter AI
+    -> Response dạng text + media có thứ tự
+    -> Web/Telegram
+
+Nếu khách xác nhận đơn:
+
+ConversationService -> SheetsService -> Google Sheets
+
+Nếu Admin đồng bộ sản phẩm:
+
+Admin API -> Redis Queue -> Product Sync Worker
+          -> Shopify -> PostgreSQL -> tải ảnh -> image embedding
+
+
+3. CẤU TRÚC THƯ MỤC
+====================
+
+app/main.py
+    Điểm khởi động FastAPI, khởi tạo AI, RAG, repository, channel và router.
+
+app/ai/
+    Interface AI và provider Gemini/OpenAI.
+    - base.py: contract chung cho chat, trình bày và vision.
+    - factory.py: chọn provider từ AI_PROVIDER.
+    - providers/gemini.py: Gemini chat + vision.
+    - providers/openai.py: OpenAI chat + vision.
+    - vision_bridge.py: cầu nối để nghiệp vụ nhận diện ảnh không phụ thuộc SDK.
+
+app/channels/
+    Lớp tích hợp kênh giao tiếp.
+    - dispatcher.py: đưa text/ảnh vào đúng service hội thoại.
+    - providers/telegram.py: gửi typing, text và album Telegram.
+    - factory.py: bật provider theo CHANNEL_PROVIDER.
+    Web gọi API trực tiếp nhưng dùng cùng ConversationService.
+
+app/conversation/
+    Bộ não hội thoại.
+    - models.py: plan, context, response, cart item, CTA và sales stage.
+    - planner.py: chuẩn hóa kết quả AI hiểu từ câu khách nói.
+    - executor.py: lấy dữ liệu đã xác minh từ DB/RAG.
+    - order_flow.py: quản lý giỏ hàng và tiến trình lập đơn.
+    - cta.py: chọn bước cần hỏi tiếp theo.
+    - presenter.py: viết câu trả lời dựa trên dữ liệu backend.
+    - service.py: điều phối luồng text.
+    - image_service.py: điều phối luồng ảnh.
+    - context.py: contract bộ nhớ; RAM dùng cho test/fallback.
+    - redis_context.py: bộ nhớ hội thoại Redis cho môi trường chạy thật.
+    - content_blocks.py: xen kẽ thông tin sản phẩm và đúng album tương ứng.
+    - fast_response.py: trả lời nhanh một số trường hợp đơn giản.
+    - shipping_policy.py: dữ liệu tính phí vận chuyển của đơn nháp.
+
+app/database/
+    - connection.py: kết nối PostgreSQL.
+    - product_repository.py: nguồn sản phẩm chính của bot.
+    - product_embedding_repository.py: tìm ảnh bằng pgvector.
+    - knowledge_repository.py: lưu/tìm tài liệu và text embedding.
+    - redis_connection.py: kết nối Redis dùng chung.
+
+app/product_recognition/
+    Nhận diện sản phẩm từ ảnh:
+    classify -> crop -> CLIP embedding -> pgvector shortlist -> AI xác minh.
+
+app/knowledge/
+    Chunk tài liệu, tạo embedding và truy xuất RAG.
+
+app/services/
+    Đồng bộ sản phẩm, cache, ảnh local, Knowledge Admin, Redis và Google Sheets.
+
+app/workers/product_sync_worker.py
+    Worker nhận job đồng bộ sản phẩm từ Redis.
+
+app/routes/
+    API Admin, Telegram và quản lý phiên hội thoại.
+
+app/static/
+    Giao diện Admin và chatbot Web.
+
+prompts/
+    Prompt có thể chỉnh qua trang Admin Prompt.
+
+db_postgre/
+    Schema PostgreSQL và pgvector.
+
+tests/
+    Unit/integration tests không gọi API bên ngoài thật.
+
+
+4. AI PROVIDER VÀ MODEL
+=======================
+
+AI_PROVIDER quyết định provider dùng cho cả hội thoại và xác minh hình ảnh.
+
+Gemini:
+
+AI_PROVIDER=gemini
+GEMINI_API_KEY=...
+GEMINI_MODEL=gemini-3.1-flash-lite
+
+OpenAI:
+
+AI_PROVIDER=openai
+OPENAI_API_KEY=...
+OPENAI_MODEL=gpt-4.1-mini
+
+Model được chọn cần hỗ trợ đọc ảnh và structured output. Khi đổi AI_PROVIDER,
+khởi động lại FastAPI. Image embedding và RAG embedding là hai hệ riêng, không
+tự động tạo lại khi đổi model chat.
+
+
+5. EMBEDDING ẢNH VÀ NHẬN DIỆN SẢN PHẨM
+=======================================
+
+Image embedding dùng CLIP/ViT local, không dùng Gemini/OpenAI:
+
+IMAGE_EMBEDDING_MODEL=ViT-B-32
+IMAGE_EMBEDDING_PRETRAINED=laion2b_s34b_b79k
+PRODUCT_VECTOR_SEARCH_ENABLED=true
+VECTOR_SEARCH_LIMIT=30
+VECTOR_MIN_SIMILARITY=0.35
+VECTOR_AUTO_ACCEPT_SIMILARITY=0.96
+VECTOR_MIN_MARGIN=0.08
+VECTOR_MAX_CANDIDATES=3
+VECTOR_REFERENCES_PER_PRODUCT=2
+
+Luồng nhận diện:
+
+1. AI hiện hành phân loại ảnh và đề xuất vùng sản phẩm.
+2. Backend crop vùng sản phẩm nếu bounding box hợp lệ.
+3. CLIP tạo vector cho ảnh khách.
+4. pgvector tìm ảnh catalog gần nhất toàn cục và theo nhóm sản phẩm.
+5. AI hiện hành so sánh shortlist với ảnh khách.
+6. Chỉ trả mã đã được xác minh; sau đó lấy thông tin chính thức từ PostgreSQL.
+
+Chỉ phải tạo lại image embedding khi đổi IMAGE_EMBEDDING_MODEL,
+IMAGE_EMBEDDING_PRETRAINED hoặc dimension/schema vector ảnh. Đổi Gemini sang
+OpenAI không yêu cầu tạo lại vector ảnh.
+
+
+6. RAG VÀ KNOWLEDGE
+====================
+
+RAG embedding được cấu hình độc lập với AI chat. Database hiện có tài liệu:
+
+RAG_EMBEDDING_PROVIDER=gemini
+RAG_EMBEDDING_MODEL=gemini-embedding-001
+RAG_EMBEDDING_DIMENSION=768
+RAG_TOP_K=5
+RAG_MIN_SIMILARITY=0.45
+RAG_MAX_CONTEXT_CHARS=6000
+
+Có thể dùng OpenAI cho chat nhưng giữ Gemini cho RAG:
+
+AI_PROVIDER=openai
+RAG_EMBEDDING_PROVIDER=gemini
+
+Provider, model và dimension của query phải giống dữ liệu đã lưu trong bảng
+knowledge_documents. Nếu đổi model/provider RAG, phải import lại tài liệu để
+tạo vector mới. Không trộn vector của hai model.
+
+Khi startup, log hiển thị số tài liệu tương thích:
+
+RAG V2 ready provider=gemini model=gemini-embedding-001 dimension=768 documents=8
+
+Nếu documents=0 hoặc có cảnh báo RAG INDEX MISMATCH, sửa cấu hình về model cũ
+hoặc import lại Knowledge bằng model mới.
+
+Trang quản trị: http://127.0.0.1:8000/admin/knowledge
+
+
+7. HỘI THOẠI VÀ QUY TRÌNH ĐƠN HÀNG
+==================================
+
+Planner AI chỉ hiểu ý định và trích xuất dữ liệu. Backend mới là nơi kiểm tra
+sản phẩm, biến thể, trường còn thiếu và tính tổng.
+
+Sales stage:
+
+browsing
+    -> collecting_product
+    -> collecting_contact
+    -> awaiting_final_confirmation
+    -> confirmed hoặc cancelled
+
+Một cart item hoàn chỉnh cần:
+
+- product_code: luôn bắt buộc.
+- quantity: luôn bắt buộc.
+- color: bắt buộc nếu sản phẩm có nhiều màu.
+- size: chỉ bắt buộc nếu sản phẩm thực sự có size.
+
+pending_items giữ lựa chọn chưa đủ dữ liệu; cart_items giữ lựa chọn hoàn chỉnh.
+Điều này giúp túi/ví/phụ kiện không bị hỏi size và cho phép khách mua nhiều sản
+phẩm trong một đơn.
+
+Contact bắt buộc trước khi tóm tắt đơn:
+
+- Họ tên.
+- Số điện thoại.
+- Địa chỉ nhận hàng.
+- Phương thức thanh toán.
+
+Khuyến mãi do AI đọc từ prompt/tài liệu và chỉ là thông tin tạm tính để nhân
+viên kiểm tra. Backend lưu promotion note cùng đơn xuất Google Sheets.
+
+
+8. BỘ NHỚ REDIS
+===============
+
+Production nên bật:
+
+REDIS_URL=redis://127.0.0.1:6379/0
+REDIS_CONVERSATION_ENABLED=true
+REDIS_CONVERSATION_TTL_SECONDS=604800
+
+Key hội thoại được tách theo channel:
+
+donghai:conversation:web:{session_id}
+donghai:conversation:telegram:{chat_id}
+
+Reload hoặc đóng/mở tab Web vẫn nhớ nếu frontend giữ session_id và key chưa hết
+TTL. Chỉ reset khi khách bấm tạo hội thoại mới, gọi API reset hoặc key hết TTL.
+
+Kiểm tra Redis Docker:
+
+docker exec donghai-redis redis-cli PING
+docker exec donghai-redis redis-cli --scan --pattern "donghai:conversation:*"
+docker exec donghai-redis redis-cli TTL "donghai:conversation:web:SESSION_ID"
+
+Trang quản lý phiên:
+
+http://127.0.0.1:8000/admin/conversations
+
+
+9. CHANNEL WEB VÀ TELEGRAM
+==========================
+
+Bật kênh trong .env:
+
+CHANNEL_PROVIDER=web
+CHANNEL_PROVIDER=telegram
+CHANNEL_PROVIDER=web,telegram
+
+Telegram cần:
+
+TELEGRAM_BOT_TOKEN=...
+TELEGRAM_WEBHOOK_SECRET=...
+
+Webhook:
+
+POST /api/telegram/webhook
+
+Provider Telegram chỉ chuyển đổi update Telegram thành IncomingChannelMessage
+và gửi response về Telegram. Tất cả nghiệp vụ sản phẩm, ảnh, RAG và đơn hàng
+dùng chung service với Web. Hướng dẫn đăng ký webhook nằm trong
+TELEGRAM_SETUP.md.
+
+Khi thêm Facebook sau này:
+
+1. Tạo provider tuân theo app/channels/base.py.
+2. Đăng ký provider trong app/channels/factory.py.
+3. Thêm facebook vào SUPPORTED_CHANNEL_PROVIDERS.
+4. Cấu hình CHANNEL_PROVIDER=web,telegram,facebook.
+
+
+10. POSTGRESQL VÀ PGVECTOR
+==========================
+
+Cấu hình:
+
+DATABASE_URL=postgresql://USER:PASSWORD@HOST:5432/DATABASE
+
+Chạy schema theo thứ tự:
+
+psql "$DATABASE_URL" -f db_postgre/001_product_catalog.sql
+psql "$DATABASE_URL" -f db_postgre/002_product_image_embeddings.sql
+psql "$DATABASE_URL" -f db_postgre/003_customer_care_rag.sql
+
+Trên Windows có thể chạy psql.exe bằng đường dẫn cài PostgreSQL. Database cần
+extension vector. Không đưa mật khẩu thật vào Git.
+
+Nguồn tư vấn chính là PostgreSQL. products.json không còn là nguồn runtime của
+chatbot; file này chỉ nên xem là dữ liệu nguồn/backup của quy trình import cũ.
+
+
+11. ĐỒNG BỘ SẢN PHẨM VÀ WORKER
+==============================
+
+Giao diện Admin tạo job trong Redis. Worker độc lập nhận job và thực hiện:
+
+Shopify -> chuẩn hóa catalog -> PostgreSQL -> tải ảnh local -> tạo embedding.
+
+Redis queue giúp:
+
+- FastAPI không bị khóa trong lúc tải ảnh/tạo embedding.
+- Giao diện polling trạng thái job từ Redis.
+- Job đang xử lý được heartbeat.
+- Job treo được đưa lại queue hoặc đánh dấu lỗi sau số lần thử tối đa.
+- API và worker có thể chạy ở hai process/máy khác nhau nếu dùng chung Redis,
+  PostgreSQL và vùng lưu ảnh phù hợp.
+
+Chạy riêng:
+
+Terminal 1:
+python -m uvicorn app.main:app --reload --port 8000
+
+Terminal 2:
+python -m app.workers.product_sync_worker
+
+Trên Windows development có thể chạy cả hai bằng:
+
+powershell -ExecutionPolicy Bypass -File .\start.ps1
+
+Mỗi lần import tối đa 1.000 SKU. Worker chỉ tạo embedding cho ảnh cần xử lý;
+vector đã tồn tại đúng model không cần tạo lại một cách vô ích.
+
+
+12. GOOGLE SHEETS
+=================
+
+Cấu hình:
+
+GOOGLE_SHEETS_ENABLED=true
+GOOGLE_SHEETS_SPREADSHEET_ID=...
+GOOGLE_SHEETS_ORDERS_RANGE=Orders!A:V
+GOOGLE_SERVICE_ACCOUNT_FILE=secrets/service.json
+
+Phải chia sẻ Sheet cho email service account với quyền Editor. File credentials
+không được commit vào Git.
+
+Chỉ xuất khi đơn đầy đủ, không còn pending item và khách xác nhận. Mỗi sản phẩm
+được ghi một dòng nhưng dùng chung order_id. Nếu Google tạm lỗi, chatbot không
+được crash; hệ thống ghi log trạng thái export để nhân viên xử lý.
+
+
+13. PROMPT VÀ GIAO DIỆN ADMIN
+=============================
+
+Các prompt chính:
+
+- conversation_planner.txt: hiểu intent và trích xuất dữ liệu có cấu trúc.
+- conversation_presenter.txt: phong cách và format trả lời.
+- promotion_rules.txt: chương trình khuyến mãi đang áp dụng.
+- cta_templates.txt: câu CTA theo bước hội thoại.
+- fast_responses.txt: phản hồi nhanh.
+- image_intent.txt: hiểu ảnh và bounding box.
+- product_recognition.txt: hướng dẫn xác minh sản phẩm.
+- product_reply.txt: format trả lời nhận diện ảnh.
+
+Không đưa giá, tồn kho hoặc dữ liệu thay đổi thường xuyên vào prompt. Các dữ
+liệu đó phải lấy từ PostgreSQL/Knowledge. Prompt có thể chỉnh tại:
+
+http://127.0.0.1:8000/admin/prompts
+
+Các trang:
+
+- /admin/products: đồng bộ và xem catalog.
+- /admin/knowledge: upload, xem và xóa tài liệu RAG.
+- /admin/prompts: chỉnh prompt TXT.
+- /admin/conversations: xem/xóa phiên hội thoại Redis.
+
+
+14. CÀI ĐẶT DEVELOPMENT TRÊN WINDOWS
+====================================
+
+Yêu cầu:
+
+- Python phù hợp với dependencies.
+- PostgreSQL có pgvector.
+- Docker Desktop cho Redis hoặc Redis bên ngoài.
+- Ngrok khi test Telegram webhook.
+
+Cài thư viện:
+
+python -m pip install -r requirements.txt
+
+Chạy Redis Docker lần đầu:
+
+docker run -d --name donghai-redis -p 6379:6379 redis:7-alpine
+
+Những lần sau:
+
+docker start donghai-redis
+
+Kiểm tra:
+
+docker exec donghai-redis redis-cli PING
+
+Chạy ứng dụng và worker:
+
+powershell -ExecutionPolicy Bypass -File .\start.ps1
+
+Mở:
+
+http://127.0.0.1:8000/admin/products
+http://127.0.0.1:8000/docs
+http://127.0.0.1:8000/health
+
+
+15. CẤU HÌNH .ENV TỐI THIỂU
+============================
+
+Không sao chép giá trị bí mật trong ví dụ này; điền bằng secrets thật tại máy
+chạy hoặc secret manager.
+
+DATABASE_URL=postgresql://USER:PASSWORD@127.0.0.1:5432/DATABASE
+
+AI_PROVIDER=openai
+OPENAI_API_KEY=...
+OPENAI_MODEL=gpt-4.1-mini
+GEMINI_API_KEY=...
+GEMINI_MODEL=gemini-3.1-flash-lite
+
+RAG_ENABLED=true
+RAG_EMBEDDING_PROVIDER=gemini
+RAG_EMBEDDING_MODEL=gemini-embedding-001
+RAG_EMBEDDING_DIMENSION=768
+
+PRODUCT_VECTOR_SEARCH_ENABLED=true
+IMAGE_EMBEDDING_MODEL=ViT-B-32
+IMAGE_EMBEDDING_PRETRAINED=laion2b_s34b_b79k
+
+REDIS_URL=redis://127.0.0.1:6379/0
+REDIS_CONVERSATION_ENABLED=true
+
+CHANNEL_PROVIDER=web,telegram
+TELEGRAM_BOT_TOKEN=...
+TELEGRAM_WEBHOOK_SECRET=...
+
+GOOGLE_SHEETS_ENABLED=true
+GOOGLE_SHEETS_SPREADSHEET_ID=...
+GOOGLE_SHEETS_ORDERS_RANGE=Orders!A:V
+GOOGLE_SERVICE_ACCOUNT_FILE=secrets/service.json
+
+
+16. KIỂM THỬ VÀ CHẨN ĐOÁN
+==========================
+
+Chạy toàn bộ test:
+
+python -m unittest discover -s tests -v
+
+Kiểm tra compile:
+
+python -m compileall -q app
+
+Log hội thoại bình thường gồm:
+
+V2 PLAN ...
+V2 EXECUTE ...
+V2 RESPONSE ...
+
+Log RAG thành công:
+
+RAG SEARCH status=found provider=... model=...
+
+Log ảnh:
+
+IMAGE CLASSIFIED ...
+VECTOR PRODUCT CANDIDATES ...
+VECTOR CANDIDATE VERIFIED ...
+WEB V2 IMAGE ... provider=... model=...
+
+Nếu RAG not_found sau khi đổi AI_PROVIDER, kiểm tra ba giá trị provider/model/
+dimension có khớp knowledge_documents hay không. Không giảm similarity trước
+khi xác nhận index tương thích.
+
+
+17. TRIỂN KHAI PRODUCTION
+=========================
+
+Production tối thiểu nên có các service tách biệt:
+
+1. reverse-proxy: Nginx/Caddy/Cloudflare, HTTPS và domain.
+2. web: FastAPI, có thể chạy nhiều replica.
+3. worker: product_sync_worker, ít nhất một replica.
+4. postgres: PostgreSQL + pgvector, backup định kỳ.
+5. redis: session + queue, bật persistence và mật khẩu/TLS nếu đi qua mạng.
+6. volume/object storage: lưu ảnh nếu worker và API không dùng chung filesystem.
+
+Không chạy `--reload` ở production. Ví dụ process Web cơ bản:
+
+python -m uvicorn app.main:app --host 0.0.0.0 --port 8000 --workers 2
+
+Worker:
+
+python -m app.workers.product_sync_worker
+
+Nếu chạy nhiều Web worker, bắt buộc bật Redis conversation để tất cả process
+đọc cùng session. Redis queue cũng phải dùng chung với worker.
+
+Checklist trước khi public:
+
+- Không commit .env, bot token, API key hay service account JSON.
+- Đổi/revoke mọi token từng xuất hiện trong ảnh, log hoặc lịch sử chat.
+- Admin phải có đăng nhập và phân quyền.
+- Bật HTTPS; Telegram webhook phải là HTTPS public.
+- Cấu hình timeout, retry và giới hạn kích thước upload.
+- Bật rate limit cho API chat, image và webhook.
+- Bật log tập trung và cảnh báo lỗi AI/Sheets/Redis/PostgreSQL.
+- Health check phải kiểm tra ít nhất Web; nên có readiness riêng cho DB/Redis.
+- Backup PostgreSQL và kiểm tra quy trình restore.
+- Theo dõi chi phí/token và thời gian planner/presenter/vision.
+- Không dùng Google Sheets như nguồn duy nhất của đơn hàng production.
+
+
+18. NHỮNG VIỆC CÒN THIẾU TRƯỚC PRODUCTION
+=========================================
+
+- Xác thực và phân quyền trang Admin.
+- Rate limiting và chống spam Telegram/Web.
+- CSRF/CORS/security headers phù hợp khi public Admin.
+- Promotion engine chính thức nếu cần tính ưu đãi tuyệt đối chính xác.
+- Order database/outbox chính thức thay vì chỉ Google Sheets.
+- Retry queue riêng cho Google Sheets và các tích hợp ngoài.
+- Dockerfile/docker-compose hoặc manifest deploy cho môi trường mục tiêu.
+- CI/CD chạy 78+ tests trước khi deploy.
+- Metrics, tracing, error monitoring và dashboard vận hành.
+- Chính sách lưu/xóa dữ liệu cá nhân của khách hàng.
+
+
+19. QUY TẮC BẢO TRÌ
+===================
+
+- Nghiệp vụ xác định dữ liệu bắt buộc phải nằm trong backend, không chỉ prompt.
+- AI chỉ hiểu ngôn ngữ và trình bày; giá/tồn kho/variant phải lấy từ DB.
+- Provider channel không chứa logic bán hàng.
+- Khi thêm channel mới, dùng Channel Provider và Dispatcher hiện có.
+- Khi đổi model chat, không tạo lại embedding.
+- Khi đổi model embedding, tạo index mới trước rồi mới chuyển cấu hình.
+- Mọi thay đổi OrderFlow phải có test nhiều sản phẩm, đổi/xóa và xác nhận đơn.
+- Mọi thay đổi response media phải test cả Web và Telegram.
+- Sau mỗi thay đổi chạy compile và toàn bộ unittest.
+
+
+20. TRẠNG THÁI HIỆN TẠI
+=======================
+
+Source hiện đã có nền tảng phù hợp cho bản staging:
+
+- Web và Telegram dùng chung nghiệp vụ.
+- Gemini/OpenAI dùng chung interface chat + vision.
+- PostgreSQL/pgvector là nguồn catalog và tìm kiếm ảnh.
+- RAG hoạt động với embedding được cấu hình độc lập.
+- Redis lưu hội thoại và hàng đợi đồng bộ.
+- Worker đồng bộ tách khỏi FastAPI.
+- Google Sheets nhận đơn nháp đã xác nhận.
+- Admin quản lý catalog, Knowledge, Prompt và phiên chat.
+
+Để production thật, ưu tiên tiếp theo là bảo mật Admin, chuẩn hóa Docker/deploy,
+thêm order persistence chính thức, retry tích hợp ngoài và monitoring.

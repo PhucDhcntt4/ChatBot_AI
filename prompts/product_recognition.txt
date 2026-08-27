@@ -1,0 +1,45 @@
+Bạn nhận được một ảnh CUSTOMER và các ảnh REFERENCE có gắn mã sản
+phẩm từ catalog chính thức.
+
+Hãy so sánh hình dáng, cấu trúc quai, mũi, đế, gót, đường may,
+chất liệu và màu sắc để tìm tối đa 3 sản phẩm giống ảnh CUSTOMER
+nhất.
+
+QUY TẮC
+
+1. Chỉ được trả mã có trong danh sách REFERENCE.
+2. Không đoán mã khi hình ảnh không đủ rõ hoặc không có mẫu phù hợp.
+3. Confidence từ 0 đến 1:
+   - 0.90–1.00: gần như cùng mẫu.
+   - 0.70–0.89: khá giống nhưng còn điểm chưa chắc chắn.
+   - dưới 0.70: không đủ tin cậy.
+4. Lý do phải ngắn gọn, chỉ mô tả đặc điểm nhìn thấy.
+5. Chỉ trả JSON:
+
+{
+  "candidates": [
+    {
+      "product_code": "G81U2",
+      "confidence": 0.93,
+      "reason": "Cùng kiểu quai đôi và đế vuông"
+    }
+  ]
+}
+
+LƯU Ý KHI CÓ NHIỀU VIEW
+
+- Một mã sản phẩm có thể có nhiều ảnh REFERENCE với view khác nhau.
+- Phải xem tất cả view của cùng một mã trước khi kết luận.
+- Ưu tiên đặc điểm cấu trúc ổn định: hình dáng thân, số ngăn, vị trí
+  khóa kéo, cấu trúc quai, đường may và logo.
+- Không chọn chủ yếu dựa vào màu sắc, nền ảnh hoặc góc chụp.
+- Nếu các mẫu gần giống nhau, reason phải nêu chi tiết giúp phân biệt.
+
+QUY TẮC TỪ CHỐI KẾT QUẢ KHÔNG KHỚP
+
+- Không bắt buộc phải chọn một REFERENCE. Danh sách candidates được phép rỗng.
+- Nếu CUSTOMER khác REFERENCE về kiểu quai, hình dạng gót, mũi, đế, số ngăn,
+  khóa kéo hoặc cấu trúc chính thì không được xem là cùng mẫu.
+- Chỉ dùng confidence từ 0.85 trở lên khi có đủ đặc điểm cho thấy gần như cùng
+  một mẫu sản phẩm, không chỉ cùng loại hoặc cùng màu.
+- Nếu chỉ giống loại sản phẩm nhưng khác thiết kế, trả {"candidates": []}.

@@ -7,6 +7,7 @@ from app.conversation.models import (
 )
 from app.conversation.service import ConversationService
 from app.services.sheets_service import SheetsService
+from googleapiclient.errors import HttpError
 
 
 class _Executable:
@@ -41,6 +42,52 @@ class _FakeAPI:
 
     def spreadsheets(self):
         return _Spreadsheets(self.calls)
+
+
+class _ErrorResponse(dict):
+    status = 503
+    reason = "Service Unavailable"
+
+
+class _TransientExecutable:
+    def __init__(self, api):
+        self.api = api
+
+    def execute(self):
+        self.api.execute_count += 1
+        if self.api.execute_count == 1:
+            raise HttpError(_ErrorResponse(), b'{"error":"temporary"}')
+        return {"updates": {"updatedRows": 2}}
+
+
+class _TransientValues:
+    def __init__(self, api):
+        self.api = api
+
+    def append(self, **kwargs):
+        self.api.calls.append(kwargs)
+        return _TransientExecutable(self.api)
+
+    def get(self, **kwargs):
+        return _Executable(self.api.read_calls)
+
+
+class _TransientSpreadsheets:
+    def __init__(self, api):
+        self.api = api
+
+    def values(self):
+        return _TransientValues(self.api)
+
+
+class _TransientAPI:
+    def __init__(self):
+        self.calls = []
+        self.read_calls = []
+        self.execute_count = 0
+
+    def spreadsheets(self):
+        return _TransientSpreadsheets(self)
 
 
 class _FakeAI:
@@ -140,6 +187,30 @@ class SheetsServiceTests(unittest.TestCase):
         self.assertEqual(result.status, "order_confirmed")
         self.assertEqual(context.sheet_export_status, "failed")
         self.assertEqual(result.facts["sheet_export"]["status"], "failed")
+
+    def test_transient_503_is_retried(self):
+        api = _TransientAPI()
+        delays = []
+        service = SheetsService(
+            enabled=True,
+            spreadsheet_id="sheet-id",
+            orders_range="Orders!A:V",
+            api=api,
+            max_append_attempts=3,
+            retry_base_delay=0.25,
+            sleep_function=delays.append,
+        )
+
+        count = service.append_confirmed_order(
+            order_id="DH-RETRY",
+            order_summary=self.summary,
+            channel="facebook",
+            session_id="session-retry",
+        )
+
+        self.assertEqual(count, 2)
+        self.assertEqual(api.execute_count, 2)
+        self.assertEqual(delays, [0.25])
 
 
 if __name__ == "__main__":

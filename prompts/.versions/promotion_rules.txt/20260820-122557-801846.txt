@@ -1,0 +1,57 @@
+QUY TẮC CHƯƠNG TRÌNH KHUYẾN MÃI — NGUỒN CẤU HÌNH CÓ THỂ CHỈNH SỬA
+
+Đây là nguồn chương trình khuyến mãi hiện hành dùng chung cho Planner và Presenter.
+Nội dung trong file này được ưu tiên hơn mọi ví dụ khuyến mãi ở prompt khác.
+
+QUY TẮC TRÍCH XUẤT CHO PLANNER
+
+- Khi khách hỏi, chọn, áp dụng, thay đổi hoặc hủy ưu đãi, thêm "promotion" vào requested_attributes.
+- Chỉ điền promotion_name khi xác định được đúng tên chương trình khách chọn.
+- Chỉ điền promotion_code khi chương trình có mã hoặc khách cung cấp mã.
+- promotion_discount_amount là tổng số tiền được giảm trực tiếp trên hóa đơn, kiểu số nguyên VND.
+- Quà tặng hoặc voucher dùng cho lần sau không được quy đổi vào promotion_discount_amount;
+  mô tả chúng trong promotion_benefit.
+- promotion_eligible=true chỉ khi đơn nháp và thông tin khách đã đáp ứng đầy đủ điều kiện.
+- promotion_eligible=false khi chắc chắn không đủ điều kiện.
+- Nếu thiếu dữ liệu để kiểm tra thì promotion_eligible=null và không tự đoán số tiền giảm.
+- Khi khách không đề cập khuyến mãi ở lượt hiện tại, giữ các trường promotion_* là null;
+  backend sẽ giữ chương trình đã ghi nhận trước đó trong đơn nháp.
+- Đây chỉ là tạm tính; nhân viên sẽ kiểm tra trước khi tạo đơn chính thức.
+
+CHƯƠNG TRÌNH HIỆN HÀNH
+
+1. Tên chương trình: Ưu đãi Sinh nhật tháng 08
+   Mã: Không có
+   Loại: Giảm tiền trực tiếp và voucher lần sau
+   Điều kiện lựa chọn 1: Khách hàng cũ sinh tháng 8, đơn từ 1.000.000 đ.
+   Giá trị lựa chọn 1: Giảm trực tiếp 200.000 đ.
+   Điều kiện lựa chọn 2: Khách hàng cũ sinh tháng 8, đơn từ 500.000 đ.
+   Giá trị lựa chọn 2: Giảm trực tiếp 100.000 đ và tặng voucher 100.000 đ cho lần sau,
+   hạn dùng 30/09/2026.
+   Khách mới: Chưa được giảm ngay; mua một sản phẩm để trở thành khách hàng cũ.
+   Phạm vi: Online và offline; không áp dụng sàn thương mại điện tử, AEON Mall Tân Phú
+   và AEON Mall Bình Tân.
+   Kết hợp: Không dùng cùng chương trình quà tặng khác, trừ chương trình ghi rõ được kết hợp.
+
+2. Tên chương trình: Your Shoes, Your Choice
+   Mã: Không có
+   Loại: Quà tặng, không giảm tiền hóa đơn
+   Điều kiện: Mua một đôi Sneaker thuộc mã GFD01, GFD02, GFD03, GFD04, GFD06, GFD07,
+   GFD09 hoặc GFD15.
+   Quyền lợi: Tặng 02 cặp Charm; không quy đổi thành tiền.
+   Phạm vi: Chỉ tại cửa hàng, không áp dụng online hoặc sàn thương mại điện tử.
+   Kết hợp: Được dùng cùng voucher sinh nhật.
+
+3. Tên chương trình: Khảo sát T8 - Nhận quà Cotton Pads
+   Mã: Không có
+   Loại: Quà tặng, không giảm tiền hóa đơn
+   Điều kiện: Sau mua hàng tại cửa hàng, khách hoàn thành khảo sát; không áp dụng cho đơn
+   chỉ mua phụ kiện linh tinh.
+   Quyền lợi: Tặng 01 hộp Cotton Pads, tối đa 01 phần quà mỗi đơn.
+   Phạm vi: Chỉ tại cửa hàng, không áp dụng đơn online.
+
+HƯỚNG DẪN BẢO TRÌ
+
+- Khi có chương trình mới, thêm một mục mới theo cùng cấu trúc.
+- Khi chương trình hết hạn, xóa mục hoặc ghi rõ "Trạng thái: Ngừng áp dụng".
+- Không sửa code khi thay tên, điều kiện, mã, giá trị giảm hoặc quà tặng.

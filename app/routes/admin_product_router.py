@@ -3,7 +3,7 @@ import re
 import unicodedata
 from pathlib import Path
 
-from fastapi import APIRouter, BackgroundTasks, File, HTTPException, Query, UploadFile
+from fastapi import APIRouter, File, HTTPException, Query, UploadFile
 from fastapi.responses import HTMLResponse
 from openpyxl import load_workbook
 from pydantic import BaseModel
@@ -55,12 +55,11 @@ def _read_excel_skus(content: bytes) -> list[str]:
     return skus
 
 
-def _start_job(skus: list[str], tasks: BackgroundTasks) -> dict:
+def _start_job(skus: list[str]) -> dict:
     try:
         job = product_sync_manager.create(skus)
     except ValueError as error:
         raise HTTPException(status_code=422, detail=str(error)) from error
-    tasks.add_task(product_sync_manager.run, job.id)
     return job.public()
 
 
@@ -70,19 +69,19 @@ def page():
 
 
 @router.post("/api/import-skus")
-def import_skus(data: SkuImportRequest, background_tasks: BackgroundTasks):
-    return _start_job(data.skus, background_tasks)
+def import_skus(data: SkuImportRequest):
+    return _start_job(data.skus)
 
 
 @router.post("/api/import-excel")
-async def import_excel(background_tasks: BackgroundTasks, file: UploadFile = File(...)):
+async def import_excel(file: UploadFile = File(...)):
     if Path(file.filename or "").suffix.casefold() != ".xlsx":
         raise HTTPException(status_code=415, detail="Chỉ hỗ trợ file .xlsx.")
     content = await file.read(MAX_UPLOAD_BYTES + 1)
     if len(content) > MAX_UPLOAD_BYTES:
         raise HTTPException(status_code=413, detail="File vượt quá 5 MB.")
     try:
-        return _start_job(_read_excel_skus(content), background_tasks)
+        return _start_job(_read_excel_skus(content))
     except ValueError as error:
         raise HTTPException(status_code=422, detail=str(error)) from error
 

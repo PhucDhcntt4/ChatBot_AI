@@ -4,6 +4,7 @@ from typing import Any
 
 from app.conversation.models import (
     ConversationContext,
+    ConversationIntent,
     ConversationPlan,
     ExecutionResult,
     SalesStage,
@@ -60,6 +61,7 @@ class OrderFlowService:
         context.draft_promotion_benefit = None
         context.draft_promotion_eligible = None
         context.cart_items = []
+        context.pending_items = []
         context.confirmed_order_id = None
         context.sheet_export_status = None
 
@@ -69,6 +71,65 @@ class OrderFlowService:
         context.draft_color = None
         context.draft_size = None
         context.draft_quantity = None
+
+    @staticmethod
+    def _pending_item(
+        context: ConversationContext,
+        product_code: str | None,
+    ) -> dict[str, Any] | None:
+        return next(
+            (
+                item
+                for item in context.pending_items
+                if item.get("product_code") == product_code
+            ),
+            None,
+        )
+
+    @classmethod
+    def _save_pending_item(
+        cls,
+        context: ConversationContext,
+        product: dict[str, Any] | None,
+        missing_fields: list[str],
+    ) -> None:
+        code = context.draft_product_code
+        if not code:
+            return
+        pending = {
+            "product_code": code,
+            "product_name": (product or {}).get("product_name"),
+            "color": context.draft_color,
+            "size": context.draft_size,
+            "quantity": context.draft_quantity,
+            "missing_fields": list(missing_fields),
+        }
+        for index, existing in enumerate(context.pending_items):
+            if existing.get("product_code") == code:
+                context.pending_items[index] = pending
+                return
+        context.pending_items.append(pending)
+
+    @staticmethod
+    def _remove_pending_item(
+        context: ConversationContext,
+        product_code: str | None,
+    ) -> None:
+        context.pending_items = [
+            item
+            for item in context.pending_items
+            if item.get("product_code") != product_code
+        ]
+
+    @staticmethod
+    def _restore_current_from_pending(
+        context: ConversationContext,
+        item: dict[str, Any],
+    ) -> None:
+        context.draft_product_code = item.get("product_code")
+        context.draft_color = item.get("color")
+        context.draft_size = item.get("size")
+        context.draft_quantity = item.get("quantity")
 
     @staticmethod
     def _product_options(
@@ -196,6 +257,11 @@ class OrderFlowService:
         context: ConversationContext,
         product: dict[str, Any] | None,
     ) -> dict[str, Any] | None:
+        if (
+            product
+            and product.get("product_code") != context.draft_product_code
+        ):
+            return None
         self._apply_product_defaults(context, product)
         if self.missing_product_fields(context, product):
             return None
@@ -314,7 +380,17 @@ class OrderFlowService:
             or plan.promotion_discount_amount is not None
             or plan.promotion_benefit
             or plan.promotion_eligible is not None
+            or plan.promotion_action is not None
         )
+
+    @staticmethod
+    def _clear_promotion(context: ConversationContext) -> None:
+        context.draft_promotion_note = None
+        context.draft_promotion_name = None
+        context.draft_promotion_code = None
+        context.draft_promotion_discount_amount = None
+        context.draft_promotion_benefit = None
+        context.draft_promotion_eligible = None
 
     def _update_promotion_note(
         self,
@@ -324,6 +400,37 @@ class OrderFlowService:
     ) -> None:
         if not self._promotion_requested(plan):
             return
+
+        if plan.promotion_action == "recommend":
+            result.facts["promotion_recommendation"] = {
+                "name": plan.promotion_name,
+                "code": plan.promotion_code,
+                "discount_amount": plan.promotion_discount_amount,
+                "benefit": plan.promotion_benefit,
+                "eligible": plan.promotion_eligible,
+            }
+            return
+
+        if plan.promotion_action == "remove":
+            self._clear_promotion(context)
+            result.facts["promotion_removed"] = True
+            return
+
+        # Hỏi/tư vấn khuyến mãi không được làm thay đổi hóa đơn. Chỉ ghi nhận
+        # khi khách đã đồng ý rõ ràng và Planner xác nhận đủ điều kiện.
+        if plan.promotion_action != "apply":
+            return
+        if plan.promotion_eligible is not True:
+            result.facts["promotion_application_rejected"] = {
+                "name": plan.promotion_name,
+                "reason": (
+                    "not_eligible"
+                    if plan.promotion_eligible is False
+                    else "missing_eligibility_information"
+                ),
+            }
+            return
+
         if plan.promotion_name:
             context.draft_promotion_name = plan.promotion_name.strip()
         if plan.promotion_code:
@@ -346,7 +453,7 @@ class OrderFlowService:
         if context.draft_promotion_benefit:
             details.append(f"Quyền lợi: {context.draft_promotion_benefit}")
         if context.draft_promotion_eligible is True:
-            details.append("Trạng thái: AI tạm tính đủ điều kiện; chờ nhân viên kiểm tra")
+            details.append("Trạng thái: Đã ghi nhận ưu đãi")
         elif context.draft_promotion_eligible is False:
             details.append("Trạng thái: Chưa đủ điều kiện áp dụng")
 
@@ -407,6 +514,7 @@ class OrderFlowService:
         )
         return {
             "items": items,
+            "pending_items": [dict(item) for item in context.pending_items],
             "item_count": len(items),
             "product_name": (current_item or {}).get("product_name"),
             "product_code": context.draft_product_code,
@@ -454,12 +562,23 @@ class OrderFlowService:
                 for item in context.cart_items
                 if item.get("product_code") != remove_code
             ]
-            removed = len(context.cart_items) < before
+            pending_before = len(context.pending_items)
+            self._remove_pending_item(context, remove_code)
+            removed = (
+                len(context.cart_items) < before
+                or len(context.pending_items) < pending_before
+            )
             if context.draft_product_code == remove_code:
-                self._restore_current_from_item(
-                    context,
-                    context.cart_items[-1] if context.cart_items else None,
-                )
+                if context.pending_items:
+                    self._restore_current_from_pending(
+                        context,
+                        context.pending_items[0],
+                    )
+                else:
+                    self._restore_current_from_item(
+                        context,
+                        context.cart_items[-1] if context.cart_items else None,
+                    )
             missing_product = (
                 [] if context.cart_items else self.missing_product_fields(context, product)
             )
@@ -486,6 +605,7 @@ class OrderFlowService:
             if (
                 context.sales_stage == SalesStage.AWAITING_FINAL_CONFIRMATION
                 and bool(context.cart_items)
+                and not context.pending_items
                 and not self.missing_contact_fields(context)
             ):
                 context.sales_stage = SalesStage.CONFIRMED
@@ -495,6 +615,14 @@ class OrderFlowService:
                 result.facts["order_summary"] = self._summary(context, product)
             else:
                 result.facts["confirmation_rejected"] = True
+            return
+
+        # Browsing replacement products must preserve the pending cart line
+        # without trying to validate or overwrite it.
+        if (
+            plan.intent == ConversationIntent.PRODUCT_RECOMMENDATION
+            and plan.order_action is None
+        ):
             return
 
         has_order_data = any((
@@ -554,13 +682,29 @@ class OrderFlowService:
         ):
             self._clear(context)
         if product_code and context.draft_product_code != product_code:
-            # A completed previous selection was already persisted when its
-            # last required field was collected, so only reset the editor for
-            # the newly selected product here.
-            context.draft_product_code = product_code
-            context.draft_color = None
-            context.draft_size = None
-            context.draft_quantity = None
+            replacing_unavailable_recommendation = (
+                product_code in context.recently_recommended_codes
+                and any(
+                    item.get("product_code") == context.draft_product_code
+                    and set(item.get("missing_fields") or []).issubset({
+                        "color_unavailable",
+                        "size_unavailable_for_color",
+                    })
+                    for item in context.pending_items
+                )
+            )
+            if replacing_unavailable_recommendation:
+                replaced_code = context.draft_product_code
+                self._remove_pending_item(context, replaced_code)
+                result.facts["replaced_unavailable_product_code"] = replaced_code
+            pending_target = self._pending_item(context, product_code)
+            if pending_target:
+                self._restore_current_from_pending(context, pending_target)
+            else:
+                context.draft_product_code = product_code
+                context.draft_color = None
+                context.draft_size = None
+                context.draft_quantity = None
         if plan.requested_color:
             context.draft_color = plan.requested_color.strip()
         if plan.requested_size:
@@ -600,18 +744,46 @@ class OrderFlowService:
         )
         if not missing_product and not product_errors:
             if previous_item_identity:
-                context.cart_items = [
-                    item
-                    for item in context.cart_items
-                    if (
-                        item.get("product_code"),
-                        self._normalize(item.get("color")),
-                        str(item.get("size") or ""),
-                    ) != previous_item_identity
-                ]
+                requested_identities = {
+                    (
+                        requested.product_code or plan.reference_product_code,
+                        self._normalize(requested.color),
+                        str(requested.size or ""),
+                    )
+                    for requested in plan.requested_items
+                }
+                # A multi-variant change can explicitly keep the old line,
+                # for example "moi mau mot doi" -> black + brown.  Remove the
+                # previous variant only when it is absent from the requested
+                # set; otherwise the valid retained line would be lost.
+                if previous_item_identity not in requested_identities:
+                    context.cart_items = [
+                        item
+                        for item in context.cart_items
+                        if (
+                            item.get("product_code"),
+                            self._normalize(item.get("color")),
+                            str(item.get("size") or ""),
+                        ) != previous_item_identity
+                    ]
             self._upsert_current_item(context, product)
+            self._remove_pending_item(context, context.draft_product_code)
+        else:
+            self._save_pending_item(
+                context,
+                product,
+                missing_product or product_errors,
+            )
+
+        # Do not lose an earlier incomplete selection when another product is
+        # completed. Bring the oldest pending line back into focus so the next
+        # customer answer completes that exact product.
+        if not missing_product and not product_errors and context.pending_items:
+            pending = context.pending_items[0]
+            self._restore_current_from_pending(context, pending)
+            missing_product = list(pending.get("missing_fields") or [])
         missing_contact = self.missing_contact_fields(context)
-        if missing_product or product_errors:
+        if missing_product or product_errors or context.pending_items:
             context.sales_stage = SalesStage.COLLECTING_PRODUCT
         elif missing_contact:
             context.sales_stage = SalesStage.COLLECTING_CONTACT

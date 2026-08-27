@@ -14,6 +14,7 @@ PLANNER_PROMPT_PATH = PROMPT_DIR / "conversation_planner.txt"
 PRESENTER_PROMPT_PATH = PROMPT_DIR / "conversation_presenter.txt"
 CTA_TEMPLATE_PATH = PROMPT_DIR / "cta_templates.txt"
 FAST_RESPONSE_PATH = PROMPT_DIR / "fast_responses.txt"
+HUMAN_HANDOFF_REPLY_PATH = PROMPT_DIR / "human_handoff_reply.txt"
 PROMOTION_RULES_PATH = PROMPT_DIR / "promotion_rules.txt"
 
 DATABASE_URL = os.getenv("DATABASE_URL", "").strip()
@@ -41,6 +42,34 @@ def env_bool(name: str, default: bool = False) -> bool:
 
 
 RAG_ENABLED = env_bool("RAG_ENABLED", False)
+CHANNEL_PROVIDER = os.getenv("CHANNEL_PROVIDER", "web").strip().casefold()
+CHANNEL_PROVIDERS = frozenset(
+    provider.strip()
+    for provider in CHANNEL_PROVIDER.split(",")
+    if provider.strip()
+)
+SUPPORTED_CHANNEL_PROVIDERS = frozenset({"web", "telegram", "facebook"})
+UNKNOWN_CHANNEL_PROVIDERS = CHANNEL_PROVIDERS - SUPPORTED_CHANNEL_PROVIDERS
+if not CHANNEL_PROVIDERS:
+    raise RuntimeError("CHANNEL_PROVIDER phải có ít nhất một channel.")
+if UNKNOWN_CHANNEL_PROVIDERS:
+    raise RuntimeError(
+        "CHANNEL_PROVIDER chưa được hỗ trợ: "
+        + ", ".join(sorted(UNKNOWN_CHANNEL_PROVIDERS))
+    )
+WEB_CHAT_CHANNEL = "web"
+TELEGRAM_CHAT_CHANNEL = "telegram"
+TELEGRAM_BOT_TOKEN = os.getenv("TELEGRAM_BOT_TOKEN", "").strip()
+TELEGRAM_WEBHOOK_SECRET = os.getenv("TELEGRAM_WEBHOOK_SECRET", "").strip()
+FACEBOOK_CHAT_CHANNEL = "facebook"
+FACEBOOK_PAGE_ACCESS_TOKEN = os.getenv(
+    "FACEBOOK_PAGE_ACCESS_TOKEN", ""
+).strip()
+FACEBOOK_VERIFY_TOKEN = os.getenv("FACEBOOK_VERIFY_TOKEN", "").strip()
+FACEBOOK_APP_SECRET = os.getenv("FACEBOOK_APP_SECRET", "").strip()
+FACEBOOK_GRAPH_API_VERSION = os.getenv(
+    "FACEBOOK_GRAPH_API_VERSION", "v23.0"
+).strip()
 
 # Google Sheets order export. The integration is disabled by default so local
 # development and tests never contact Google unless explicitly configured.
@@ -56,7 +85,7 @@ GOOGLE_SERVICE_ACCOUNT_FILE = os.getenv(
     "secrets/google-sheets-service-account.json",
 ).strip()
 RAG_EMBEDDING_PROVIDER = os.getenv(
-    "RAG_EMBEDDING_PROVIDER", "auto"
+    "RAG_EMBEDDING_PROVIDER", "gemini"
 ).strip().casefold()
 RAG_EMBEDDING_MODEL = os.getenv("RAG_EMBEDDING_MODEL", "").strip()
 RAG_EMBEDDING_DIMENSION = int(os.getenv("RAG_EMBEDDING_DIMENSION", "768"))
@@ -89,4 +118,22 @@ VECTOR_MAX_CANDIDATES = int(os.getenv("VECTOR_MAX_CANDIDATES", "3"))
 
 VECTOR_REFERENCES_PER_PRODUCT = int(
     os.getenv("VECTOR_REFERENCES_PER_PRODUCT", "2")
+)
+
+REDIS_HOST = os.getenv("REDIS_HOST", "localhost").strip()
+REDIS_PORT = int(os.getenv("REDIS_PORT", "6379"))
+REDIS_DB = int(os.getenv("REDIS_DB", "0"))
+REDIS_TTL = int(os.getenv("REDIS_TTL", "300"))
+
+#HUMAN
+
+HUMAN_MODE_ENABLED = (
+    os.getenv("HUMAN_MODE_ENABLED", "false")
+    .strip()
+    .casefold()
+    in {"1", "true", "yes", "on"}
+)
+
+HUMAN_MODE_TTL_SECONDS = int(
+    os.getenv("HUMAN_MODE_TTL_SECONDS", "86400")
 )

@@ -187,6 +187,7 @@ class ProductRecognitionService:
             contents=contents,
             config=types.GenerateContentConfig(
                 response_mime_type="application/json",
+                response_schema=ProductRecognitionResult,
                 temperature=0,
             ),
         )

@@ -1,12 +1,14 @@
 import logging
 from datetime import datetime
 from pathlib import Path
+from time import sleep
 from typing import Any
 from uuid import uuid4
 from zoneinfo import ZoneInfo
 
 from google.oauth2.service_account import Credentials  # type: ignore
 from googleapiclient.discovery import build  # type: ignore
+from googleapiclient.errors import HttpError  # type: ignore
 
 from app.config import (
     GOOGLE_SERVICE_ACCOUNT_FILE,
@@ -40,6 +42,9 @@ class SheetsService:
         orders_range: str = GOOGLE_SHEETS_ORDERS_RANGE,
         credentials_file: str = GOOGLE_SERVICE_ACCOUNT_FILE,
         api: Any | None = None,
+        max_append_attempts: int = 3,
+        retry_base_delay: float = 1.0,
+        sleep_function: Any = sleep,
     ) -> None:
         self.enabled = enabled
         self.spreadsheet_id = spreadsheet_id.strip()
@@ -51,7 +56,20 @@ class SheetsService:
             else PROJECT_ROOT / credentials_path
         )
         self._api = api
+        self.max_append_attempts = max(1, int(max_append_attempts))
+        self.retry_base_delay = max(0.0, float(retry_base_delay))
+        self._sleep = sleep_function
         self.last_append_response: dict[str, Any] | None = None
+
+    @staticmethod
+    def _retryable_http_error(error: HttpError) -> bool:
+        return int(getattr(error.resp, "status", 0) or 0) in {
+            429,
+            500,
+            502,
+            503,
+            504,
+        }
 
     def validate(self) -> None:
         if not self.enabled:
@@ -132,7 +150,7 @@ class SheetsService:
                 order_summary.get("shipping_fee"),
                 order_summary.get("total"),
                 order_summary.get("promotion_note")
-                or "AI tạm tính - chưa ghi nhận khuyến mãi; nhân viên kiểm tra lại trước khi tạo đơn.",
+                or "Không ghi nhận chương trình khuyến mãi.",
                 "pending_review",
                 "exported",
             ])
@@ -156,19 +174,60 @@ class SheetsService:
         )
         if not rows:
             raise ValueError("Đơn đã xác nhận không có sản phẩm để xuất Sheets.")
-        response = (
-            self._client()
-            .spreadsheets()
-            .values()
-            .append(
-                spreadsheetId=self.spreadsheet_id,
-                range=self.orders_range,
-                valueInputOption="RAW",
-                insertDataOption="INSERT_ROWS",
-                body={"values": rows},
-            )
-            .execute()
-        )
+        response = None
+        for attempt in range(1, self.max_append_attempts + 1):
+            try:
+                response = (
+                    self._client()
+                    .spreadsheets()
+                    .values()
+                    .append(
+                        spreadsheetId=self.spreadsheet_id,
+                        range=self.orders_range,
+                        valueInputOption="RAW",
+                        insertDataOption="INSERT_ROWS",
+                        body={"values": rows},
+                    )
+                    .execute()
+                )
+                break
+            except HttpError as error:
+                if (
+                    not self._retryable_http_error(error)
+                    or attempt >= self.max_append_attempts
+                ):
+                    raise
+
+                # An append can reach Google even when its response is lost.
+                # Check the stable order ID before retrying to avoid duplicates.
+                try:
+                    existing_rows = self.find_order_rows(order_id)
+                except Exception:
+                    existing_rows = []
+                if existing_rows:
+                    logger.warning(
+                        "GOOGLE SHEETS ORDER ALREADY PRESENT AFTER ERROR "
+                        "order_id=%s rows=%s attempt=%s",
+                        order_id,
+                        len(existing_rows),
+                        attempt,
+                    )
+                    return len(existing_rows)
+
+                delay = self.retry_base_delay * (2 ** (attempt - 1))
+                logger.warning(
+                    "GOOGLE SHEETS ORDER RETRY order_id=%s status=%s "
+                    "attempt=%s/%s delay=%.1fs",
+                    order_id,
+                    getattr(error.resp, "status", None),
+                    attempt + 1,
+                    self.max_append_attempts,
+                    delay,
+                )
+                self._sleep(delay)
+
+        if response is None:
+            raise RuntimeError("Google Sheets không trả kết quả ghi đơn hàng.")
         self.last_append_response = response
         updated_range = (
             response.get("updates", {}).get("updatedRange")

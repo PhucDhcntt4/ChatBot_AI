@@ -12,6 +12,7 @@
       rel="stylesheet"
       href="/static/css/admin_sidebar.css?v=20260815-redesign2"
     />
+    <link rel="stylesheet" href="/static/css/chatbot.css?v=20260824-1" />
   </head>
   <body class="has-admin-sidebar">
     <aside class="admin-sidebar">
@@ -24,6 +25,7 @@
         <a class="active" href="/admin/products"><span>◫</span>Sản phẩm</a>
         <a href="/admin/knowledge"><span>▤</span>Knowledge</a>
         <a href="/admin/prompts"><span>✎</span>Prompt</a>
+        <a href="/admin/conversations"><span>☰</span>Hội thoại</a>
       </nav>
     </aside>
     <header class="top">
@@ -240,7 +242,10 @@
         <h3>Chat với đội ngũ hỗ trợ<br />của chúng tôi</h3>
       </div>
       <div class="ck-body" id="chatBody">
-        <div class="ck-msg bot">👋 Xin chào anh/chị! Em là trợ lý AI của Đông Hải. Anh/chị cần em hỗ trợ gì ạ?</div>
+        <div class="ck-msg bot">
+          👋 Xin chào anh/chị! Em là trợ lý AI của Đông Hải. Anh/chị cần em hỗ
+          trợ gì ạ?
+        </div>
       </div>
       <div class="ck-foot">
         <div class="ck-input-row">
@@ -314,8 +319,9 @@
         &#8250;
       </button>
     </div>
+    <script src="/static/js/admin_base.js?v=20260824-1"></script>
     <script
-      src="/static/js/product_admin.js?v=20260817-chat-reset"
+      src="/static/js/product_admin.js?v=20260821-persistent-chat"
       defer
     ></script>
   </body>

@@ -3,6 +3,7 @@ import unittest
 from fastapi.testclient import TestClient
 
 from app.conversation.models import ConversationIntent, ConversationResponse
+from app.channels import ChannelDispatcher
 from app.main import app
 
 
@@ -51,6 +52,10 @@ class WebTests(unittest.TestCase):
     def setUp(self):
         app.state.conversation_service = FakeConversationService()
         app.state.image_conversation_service = FakeImageConversationService()
+        app.state.channel_dispatcher = ChannelDispatcher(
+            app.state.conversation_service,
+            app.state.image_conversation_service,
+        )
         self.client = TestClient(app)
 
     def test_home_page_redirects_to_combined_admin_chat_page(self):

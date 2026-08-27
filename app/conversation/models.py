@@ -12,6 +12,7 @@ class ConversationIntent(str, Enum):
     POLICY_QUESTION = "policy_question"
     GENERAL_CHAT = "general_chat"
     UNKNOWN = "unknown"
+    HUMAN_HANDOFF = "human_handoff"
 
 
 class CTAType(str, Enum):
@@ -26,7 +27,9 @@ class CTAType(str, Enum):
     PROVIDE_CONTACT = "provide_contact"
     CHOOSE_PAYMENT = "choose_payment"
     CONFIRM_ORDER = "confirm_order"
+    APPLY_PROMOTION = "apply_promotion"
     PROVIDE_MORE_INFO = "provide_more_info"
+    OUT_OF_STOCK_OPTIONS = "out_of_stock_options"
 
 
 class SalesStage(str, Enum):
@@ -61,14 +64,19 @@ class ConversationPlan(BaseModel):
     requested_color: str | None = None
     requested_size: str | None = None
     requested_quantity: int | None = Field(default=None, ge=1, le=99)
+    quantity_explicitly_provided: bool = False
     requested_items: list[RequestedOrderItem] = Field(default_factory=list)
     customer_name: str | None = None
     customer_phone: str | None = None
     shipping_address: str | None = None
     payment_method: Literal["cod", "bank_transfer", "other"] | None = None
     requested_attributes: list[str] = Field(default_factory=list)
+    use_knowledge: bool = False
+    knowledge_query: str | None = None
+    knowledge_categories: list[str] = Field(default_factory=list)
     requested_count: int = Field(default=3, ge=1, le=5)
     send_images: bool = False
+    explicit_image_request: bool = False
     buying_intent: bool = False
     suggested_cta_type: CTAType | None = None
     suggested_cta_index: int | None = Field(default=None, ge=0)
@@ -81,6 +89,7 @@ class ConversationPlan(BaseModel):
     promotion_discount_amount: int | None = Field(default=None, ge=0)
     promotion_benefit: str | None = None
     promotion_eligible: bool | None = None
+    promotion_action: Literal["recommend", "apply", "remove"] | None = None
 
     @field_validator("reference_product_code")
     @classmethod
@@ -115,6 +124,7 @@ class ConversationContext(BaseModel):
     draft_promotion_benefit: str | None = None
     draft_promotion_eligible: bool | None = None
     cart_items: list[dict[str, Any]] = Field(default_factory=list)
+    pending_items: list[dict[str, Any]] = Field(default_factory=list)
     last_cta_type: CTAType | None = None
     cta_history: list[str] = Field(default_factory=list)
     history: list[HistoryItem] = Field(default_factory=list)
@@ -126,6 +136,12 @@ class ProductMedia(BaseModel):
     product_code: str
     color: str | None = None
     image_urls: list[str] = Field(default_factory=list)
+
+
+class ResponseContentBlock(BaseModel):
+    type: Literal["text", "media"]
+    text: str | None = None
+    media: ProductMedia | None = None
 
 
 class ExecutionResult(BaseModel):
@@ -147,6 +163,7 @@ class ConversationResponse(BaseModel):
     intent: ConversationIntent
     products: list[dict[str, Any]] = Field(default_factory=list)
     media: list[ProductMedia] = Field(default_factory=list)
+    content_blocks: list[ResponseContentBlock] = Field(default_factory=list)
     sources: list[dict[str, Any]] = Field(default_factory=list)
     cta_type: CTAType = CTAType.NONE
     cta_text: str | None = None

@@ -1,0 +1,17 @@
+# Fast path cho câu xã giao ngắn.
+# triggers phân cách bằng dấu | và chỉ khớp khi toàn bộ tin nhắn giống trigger.
+# Có thể thêm nhiều dòng reply để hệ thống luân phiên câu trả lời.
+
+[greeting]
+triggers: hi | hello | chào | xin chào | alo | chào shop | shop ơi | chào e, các tin nhắn không rõ mục đích thì reply
+reply: Dạ em chào anh/chị ạ, em là Ms. Hài, em hỗ trợ mình ạ? Anh/chị cần em giúp gì ạ? ❤️
+reply: Dạ em chào anh/chị! Em có thể hỗ trợ tư vấn sản phẩm, size, màu và chính sách mua hàng ạ.
+
+[thanks]
+triggers: cảm ơn | cảm ơn em | cám ơn | thank you | thanks
+reply: Dạ, em rất vui vì đã hỗ trợ được anh/chị ạ ❤️
+reply: Dạ không có gì ạ. Khi cần hỗ trợ thêm, anh/chị cứ nhắn em nhé ❤️
+
+[goodbye]
+triggers: tạm biệt | bye | goodbye
+reply: Dạ em chào anh/chị! Khi cần tư vấn thêm, anh/chị cứ nhắn Đông Hải nhé ❤️

@@ -28,7 +28,7 @@ SHOP = os.getenv("SHOP")
 TOKEN = os.getenv("SHOPIFY_TOKEN")
 API_VERSION = os.getenv("SHOPIFY_API_VERSION")
 
-# ThÆ° má»¥c lÆ°u file JSON.
+# Thư mục lưu file JSON.
 PROJECT_ROOT = Path(__file__).resolve().parent
 
 
@@ -237,7 +237,7 @@ query ProductVariants(
 
 def validate_config() -> None:
     """
-    Kiá»ƒm tra cĂ¡c biáº¿n cáº¥u hĂ¬nh Shopify.
+    Kiểm tra các biến cấu hình Shopify.
     """
 
     missing: list[str] = []
@@ -253,7 +253,7 @@ def validate_config() -> None:
 
     if missing:
         raise ValueError(
-            "Thiáº¿u biáº¿n mĂ´i trÆ°á»ng trong file .env: "
+            "Thiếu biến môi trường trong file .env: "
             + ", ".join(missing)
         )
 
@@ -263,7 +263,7 @@ def shopify_graphql(
     variables: dict[str, Any] | None = None,
 ) -> dict[str, Any]:
     """
-    Gá»i Shopify GraphQL Admin API.
+    Gọi Shopify GraphQL Admin API.
     """
 
     validate_config()
@@ -291,12 +291,12 @@ def shopify_graphql(
 
     except requests.Timeout as error:
         raise RuntimeError(
-            "Shopify API pháº£n há»“i quĂ¡ thá»i gian."
+            "Shopify API phản hồi quá thời gian."
         ) from error
 
     except requests.RequestException as error:
         raise RuntimeError(
-            f"KhĂ´ng thá»ƒ káº¿t ná»‘i Shopify API: {error}"
+            f"Không thể kết nối Shopify API: {error}"
         ) from error
 
     try:
@@ -304,12 +304,12 @@ def shopify_graphql(
 
     except ValueError as error:
         raise RuntimeError(
-            "Shopify tráº£ vá» dá»¯ liá»‡u khĂ´ng pháº£i JSON."
+            "Shopify trả về dữ liệu không phải JSON."
         ) from error
 
     if result.get("errors"):
         raise RuntimeError(
-            "Shopify GraphQL lá»—i:\n"
+            "Shopify GraphQL lỗi:\n"
             + json.dumps(
                 result["errors"],
                 ensure_ascii=False,
@@ -319,7 +319,7 @@ def shopify_graphql(
 
     if "data" not in result:
         raise RuntimeError(
-            "Shopify khĂ´ng tráº£ vá» trÆ°á»ng data."
+            "Shopify không trả về trường data."
         )
 
     return result["data"]
@@ -327,7 +327,7 @@ def shopify_graphql(
 
 def normalize_sku(sku: str) -> str:
     """
-    Chuáº©n hĂ³a SKU ngÆ°á»i dĂ¹ng nháº­p.
+    Chuẩn hóa SKU người dùng nhập.
     """
 
     return sku.strip().upper()
@@ -335,7 +335,7 @@ def normalize_sku(sku: str) -> str:
 
 def escape_search_value(value: str) -> str:
     """
-    Escape giĂ¡ trá»‹ dĂ¹ng trong Shopify search query.
+    Escape giá trị dùng trong Shopify search query.
     """
 
     return (
@@ -350,10 +350,10 @@ def product_contains_code(
     product_code: str,
 ) -> bool:
     """
-    Kiá»ƒm tra mĂ£ máº«u trĂªn SKU, handle vĂ  mĂ´ táº£ sáº£n pháº©m.
+    Kiểm tra mã mẫu trên SKU, handle và mô tả sản phẩm.
 
-    Má»™t sá»‘ mĂ u Ä‘Æ°á»£c quáº£n lĂ½ thĂ nh Shopify Product riĂªng vĂ  cĂ³ thá»ƒ dĂ¹ng
-    SKU variant khĂ¡c, trong khi mĂ£ máº«u váº«n náº±m trong handle/mĂ´ táº£.
+    Một số màu được quản lý thành Shopify Product riêng và có thể dùng
+    SKU variant khác, trong khi mã mẫu vẫn nằm trong handle/mô tả.
     """
 
     normalized_code = normalize_sku(product_code)
@@ -378,7 +378,7 @@ def product_contains_code(
 
     description = str(product.get("description") or "")
     code_pattern = re.compile(
-        r"(?:MĂƒ|MA)\s*Sáº¢N\s*PHáº¨M\s*:\s*"
+        r"(?:MÃ|MA)\s*SẢN\s*PHẨM\s*:\s*"
         + re.escape(normalized_code)
         + r"\b",
         re.IGNORECASE,
@@ -391,7 +391,7 @@ def get_all_product_variants(
     product_id: str,
 ) -> list[dict[str, Any]]:
     """
-    Láº¥y toĂ n bá»™ variants cá»§a má»™t sáº£n pháº©m báº±ng phĂ¢n trang Shopify.
+    Lấy toàn bộ variants của một sản phẩm bằng phân trang Shopify.
     """
 
     all_variants: list[dict[str, Any]] = []
@@ -411,7 +411,7 @@ def get_all_product_variants(
 
         if not product:
             raise ValueError(
-                f"KhĂ´ng tĂ¬m tháº¥y sáº£n pháº©m Shopify: {product_id}"
+                f"Không tìm thấy sản phẩm Shopify: {product_id}"
             )
 
         variants_connection = product.get("variants", {})
@@ -419,7 +419,7 @@ def get_all_product_variants(
 
         if not isinstance(nodes, list):
             raise RuntimeError(
-                "Shopify tráº£ vá» danh sĂ¡ch variants khĂ´ng há»£p lá»‡."
+                "Shopify trả về danh sách variants không hợp lệ."
             )
 
         all_variants.extend(nodes)
@@ -433,7 +433,7 @@ def get_all_product_variants(
 
         if not cursor:
             raise RuntimeError(
-                "Shopify bĂ¡o cĂ²n trang variants nhÆ°ng khĂ´ng tráº£ endCursor."
+                "Shopify báo còn trang variants nhưng không trả endCursor."
             )
 
     return all_variants
@@ -443,16 +443,16 @@ def find_products_by_sku(
     sku: str,
 ) -> list[dict[str, Any]]:
     """
-    TĂ¬m táº¥t cáº£ sáº£n pháº©m ACTIVE chá»©a variant cĂ³ SKU chĂ­nh xĂ¡c.
+    Tìm tất cả sản phẩm ACTIVE chứa variant có SKU chính xác.
 
-    Shopify cĂ³ thá»ƒ quáº£n lĂ½ má»—i mĂ u thĂ nh má»™t Product riĂªng nhÆ°ng
-    cĂ¡c Product Ä‘Ă³ váº«n dĂ¹ng chung má»™t mĂ£ SKU.
+    Shopify có thể quản lý mỗi màu thành một Product riêng nhưng
+    các Product đó vẫn dùng chung một mã SKU.
     """
 
     normalized_sku = normalize_sku(sku)
 
     if not normalized_sku:
-        raise ValueError("MĂ£ SKU khĂ´ng Ä‘Æ°á»£c Ä‘á»ƒ trá»‘ng.")
+        raise ValueError("Mã SKU không được để trống.")
 
     escaped_sku = escape_search_value(normalized_sku)
 
@@ -463,8 +463,8 @@ def find_products_by_sku(
         data = shopify_graphql(
             PRODUCT_BY_SKU_QUERY,
             {
-                # TĂ¬m máº·c Ä‘á»‹nh trĂªn nhiá»u trÆ°á»ng thay vĂ¬ chá»‰ SKU.
-                # Cáº§n thiáº¿t khi má»—i mĂ u lĂ  má»™t Product riĂªng.
+                # Tìm mặc định trên nhiều trường thay vì chỉ SKU.
+                # Cần thiết khi mỗi màu là một Product riêng.
                 "query": f'"{escaped_sku}"',
                 "variantLimit": 50,
                 "imageLimit": 100,
@@ -477,7 +477,7 @@ def find_products_by_sku(
 
         if not isinstance(page_nodes, list):
             raise RuntimeError(
-                "Shopify tráº£ vá» káº¿t quáº£ tĂ¬m SKU khĂ´ng há»£p lá»‡."
+                "Shopify trả về kết quả tìm SKU không hợp lệ."
             )
 
         variants.extend(page_nodes)
@@ -491,14 +491,14 @@ def find_products_by_sku(
 
         if not cursor:
             raise RuntimeError(
-                "Shopify bĂ¡o cĂ²n káº¿t quáº£ SKU nhÆ°ng khĂ´ng tráº£ endCursor."
+                "Shopify báo còn kết quả SKU nhưng không trả endCursor."
             )
 
     if not variants:
         return []
 
-    # Shopify search cĂ³ thá»ƒ tráº£ vá» nhiá»u káº¿t quáº£ gáº§n giá»‘ng.
-    # Kiá»ƒm tra mĂ£ trĂªn SKU, handle hoáº·c mĂ´ táº£ báº±ng Python.
+    # Shopify search có thể trả về nhiều kết quả gần giống.
+    # Kiểm tra mã trên SKU, handle hoặc mô tả bằng Python.
     code_matches = [
         variant
         for variant in variants
@@ -508,7 +508,7 @@ def find_products_by_sku(
     if not code_matches:
         return []
 
-    # Chá»‰ láº¥y sáº£n pháº©m Ä‘ang ACTIVE.
+    # Chỉ lấy sản phẩm đang ACTIVE.
     active_matches = [
         variant
         for variant in code_matches
@@ -520,8 +520,8 @@ def find_products_by_sku(
 
     if not active_matches:
         raise ValueError(
-            f"ÄĂ£ tĂ¬m tháº¥y SKU '{normalized_sku}', "
-            "nhÆ°ng sáº£n pháº©m khĂ´ng á»Ÿ tráº¡ng thĂ¡i ACTIVE."
+            f"Đã tìm thấy SKU '{normalized_sku}', "
+            "nhưng sản phẩm không ở trạng thái ACTIVE."
         )
 
     products_by_id: dict[str, dict[str, Any]] = {}
@@ -533,8 +533,8 @@ def find_products_by_sku(
         if not product_id:
             continue
 
-        # Má»™t Product cĂ³ nhiá»u size cĂ¹ng SKU nĂªn cáº§n khá»­ trĂ¹ng theo
-        # Shopify Product ID trÆ°á»›c khi táº£i toĂ n bá»™ variants.
+        # Một Product có nhiều size cùng SKU nên cần khử trùng theo
+        # Shopify Product ID trước khi tải toàn bộ variants.
         if product_id in products_by_id:
             continue
 
@@ -579,7 +579,7 @@ def find_product_by_sku(
     sku: str,
 ) -> dict[str, Any] | None:
     """
-    HĂ m tÆ°Æ¡ng thĂ­ch cho nÆ¡i chá»‰ cáº§n káº¿t quáº£ Ä‘áº§u tiĂªn.
+    Hàm tương thích cho nơi chỉ cần kết quả đầu tiên.
     """
 
     products = find_products_by_sku(sku)
@@ -589,30 +589,30 @@ def print_product_summary(
     product_data: dict[str, Any],
 ) -> None:
     """
-    In thĂ´ng tin tĂ³m táº¯t ra terminal.
+    In thông tin tóm tắt ra terminal.
     """
 
     product = product_data["product"]
     matched_variant = product_data["matched_variant"]
 
-    print("\n========== Sáº¢N PHáº¨M ==========")
-    print(f"TĂªn: {product.get('title')}")
+    print("\n========== SẢN PHẨM ==========")
+    print(f"Tên: {product.get('title')}")
     print(f"Handle: {product.get('handle')}")
-    print(f"Tráº¡ng thĂ¡i: {product.get('status')}")
-    print(f"Loáº¡i: {product.get('productType')}")
-    print(f"NhĂ  cung cáº¥p: {product.get('vendor')}")
-    print(f"SKU tĂ¬m tháº¥y: {matched_variant.get('sku')}")
-    print(f"GiĂ¡: {matched_variant.get('price')}")
+    print(f"Trạng thái: {product.get('status')}")
+    print(f"Loại: {product.get('productType')}")
+    print(f"Nhà cung cấp: {product.get('vendor')}")
+    print(f"SKU tìm thấy: {matched_variant.get('sku')}")
+    print(f"Giá: {matched_variant.get('price')}")
     print(
-        "Tá»“n kho: "
+        "Tồn kho: "
         f"{matched_variant.get('inventoryQuantity')}"
     )
     print(
-        "Sá»‘ lÆ°á»£ng áº£nh: "
+        "Số lượng ảnh: "
         f"{len(product.get('images', {}).get('nodes', []))}"
     )
     print(
-        "Sá»‘ lÆ°á»£ng variants: "
+        "Số lượng variants: "
         f"{len(product.get('variants', {}).get('nodes', []))}"
     )
 
@@ -625,7 +625,7 @@ def validate_product_structure(
     product_data: dict[str, Any],
 ) -> None:
     """
-    Báº£o Ä‘áº£m dá»¯ liá»‡u lÆ°u ra Ä‘Ăºng schema mĂ  á»©ng dá»¥ng Ä‘ang Ä‘á»c:
+    Bảo đảm dữ liệu lưu ra đúng schema mà ứng dụng đang đọc:
     searched_sku + matched_variant + product.
     """
 
@@ -634,35 +634,35 @@ def validate_product_structure(
     product = product_data.get("product")
 
     if not isinstance(searched_sku, str) or not searched_sku:
-        raise ValueError("Dá»¯ liá»‡u thiáº¿u searched_sku há»£p lá»‡.")
+        raise ValueError("Dữ liệu thiếu searched_sku hợp lệ.")
 
     if not isinstance(matched_variant, dict):
-        raise ValueError("Dá»¯ liá»‡u thiáº¿u matched_variant.")
+        raise ValueError("Dữ liệu thiếu matched_variant.")
 
     if not isinstance(product, dict):
-        raise ValueError("Dá»¯ liá»‡u thiáº¿u product.")
+        raise ValueError("Dữ liệu thiếu product.")
 
     if not isinstance(product.get("featuredImage"), dict):
-        raise ValueError("Product thiáº¿u featuredImage.")
+        raise ValueError("Product thiếu featuredImage.")
 
     images = product.get("images")
     if not isinstance(images, dict) or not isinstance(
         images.get("nodes"),
         list,
     ):
-        raise ValueError("Product.images.nodes khĂ´ng há»£p lá»‡.")
+        raise ValueError("Product.images.nodes không hợp lệ.")
 
     variants = product.get("variants")
     if not isinstance(variants, dict) or not isinstance(
         variants.get("nodes"),
         list,
     ):
-        raise ValueError("Product.variants.nodes khĂ´ng há»£p lá»‡.")
+        raise ValueError("Product.variants.nodes không hợp lệ.")
 
 
 def save_product(product_data: dict) -> None:
     """
-    ThĂªm hoáº·c cáº­p nháº­t sáº£n pháº©m vĂ o products.json
+    Thêm hoặc cập nhật sản phẩm vào products.json
     """
 
     validate_product_structure(product_data)
@@ -672,7 +672,7 @@ def save_product(product_data: dict) -> None:
         exist_ok=True
     )
 
-    # Náº¿u chÆ°a cĂ³ file
+    # Nếu chưa có file
     if not PRODUCTS_FILE.exists():
         products = []
     else:
@@ -690,7 +690,7 @@ def save_product(product_data: dict) -> None:
     product_id = product_data["product"].get("id")
 
     if not product_id:
-        raise ValueError("Sáº£n pháº©m khĂ´ng cĂ³ Shopify ID.")
+        raise ValueError("Sản phẩm không có Shopify ID.")
 
     updated = False
 
@@ -725,22 +725,22 @@ def save_product(product_data: dict) -> None:
         )
 
     if updated:
-        print(f"âœ“ Updated: {sku}")
+        print(f"✓ Updated: {sku}")
     else:
-        print(f"âœ“ Added: {sku}")
+        print(f"✓ Added: {sku}")
 
 
 def import_products_to_database(
     product_items: list[dict[str, Any]],
 ) -> int:
-    """Chuáº©n hĂ³a vĂ  upsert cĂ¡c sáº£n pháº©m vá»«a láº¥y vĂ o PostgreSQL."""
+    """Chuẩn hóa và upsert các sản phẩm vừa lấy vào PostgreSQL."""
 
     if not product_items:
-        raise ValueError("KhĂ´ng cĂ³ sáº£n pháº©m Ä‘á»ƒ import vĂ o database.")
+        raise ValueError("Không có sản phẩm để import vào database.")
 
     catalog = normalize_catalog(product_items)
     if not catalog["products"]:
-        raise ValueError("Dá»¯ liá»‡u sáº£n pháº©m khĂ´ng thá»ƒ chuáº©n hĂ³a.")
+        raise ValueError("Dữ liệu sản phẩm không thể chuẩn hóa.")
 
     variant_count = sum(
         len(product["variants"])
@@ -752,7 +752,7 @@ def import_products_to_database(
     )
 
     print(
-        "\nÄang import database: "
+        "\nĐang import database: "
         f"products={len(catalog['products'])}, "
         f"variants={variant_count}, images={image_count}"
     )
@@ -763,24 +763,24 @@ def import_products_to_database(
 
 def main() -> None:
     print("====================================")
-    print("  Láº¤Y Sáº¢N PHáº¨M SHOPIFY THEO SKU")
+    print("  LẤY SẢN PHẨM SHOPIFY THEO SKU")
     print("====================================")
-    print("Nháº­p 'exit' hoáº·c 'q' Ä‘á»ƒ thoĂ¡t chÆ°Æ¡ng trĂ¬nh.")
+    print("Nhập 'exit' hoặc 'q' để thoát chương trình.")
 
     while True:
         print("\n------------------------------------")
 
         sku = input(
-            "Nháº­p mĂ£ SKU sáº£n pháº©m: "
+            "Nhập mã SKU sản phẩm: "
         ).strip()
 
-        # ThoĂ¡t chÆ°Æ¡ng trĂ¬nh
+        # Thoát chương trình
         if sku.lower() in {"exit", "quit", "q"}:
-            print("\nÄĂ£ káº¿t thĂºc chÆ°Æ¡ng trĂ¬nh.")
+            print("\nĐã kết thúc chương trình.")
             break
 
         if not sku:
-            print("Lá»—i: Báº¡n chÆ°a nháº­p mĂ£ SKU.")
+            print("Lỗi: Bạn chưa nhập mã SKU.")
             continue
 
         try:
@@ -788,19 +788,19 @@ def main() -> None:
 
             if not matching_products:
                 print(
-                    f"KhĂ´ng tĂ¬m tháº¥y sáº£n pháº©m cĂ³ SKU: "
+                    f"Không tìm thấy sản phẩm có SKU: "
                     f"{normalize_sku(sku)}"
                 )
                 continue
 
             print(
-                "\nTĂ¬m tháº¥y "
+                "\nTìm thấy "
                 f"{len(matching_products)} Shopify Product "
-                f"cĂ¹ng mĂ£ {normalize_sku(sku)}."
+                f"cùng mã {normalize_sku(sku)}."
             )
 
             for product_data in matching_products:
-                # Má»—i mĂ u cĂ³ thá»ƒ lĂ  má»™t Shopify Product riĂªng.
+                # Mỗi màu có thể là một Shopify Product riêng.
                 save_product(product_data)
                 print_product_summary(product_data)
 
@@ -813,35 +813,35 @@ def main() -> None:
                 matching_products
             )
 
-            print("\n========== Táº O IMAGE EMBEDDING ==========")
+            print("\n========== TẠO IMAGE EMBEDDING ==========")
 
             try:
                 build_product_image_embeddings()
             except Exception as error:
                 print(
-                    "Cáº£nh bĂ¡o: sáº£n pháº©m Ä‘Ă£ Ä‘Æ°á»£c import nhÆ°ng "
-                    f"khĂ´ng thá»ƒ táº¡o embedding: {error}"
+                    "Cảnh báo: sản phẩm đã được import nhưng "
+                    f"không thể tạo embedding: {error}"
                 )
 
-            print("\n========== HOĂ€N THĂ€NH ==========")
-            print(f"ÄĂ£ lÆ°u vĂ o: {PRODUCTS_FILE}")
+            print("\n========== HOÀN THÀNH ==========")
+            print(f"Đã lưu vào: {PRODUCTS_FILE}")
             print(
-                "ÄĂ£ import/cáº­p nháº­t PostgreSQL: "
+                "Đã import/cập nhật PostgreSQL: "
                 f"sync_run_id={sync_run_id}"
             )
             print(
-                "áº¢nh local: "
-                f"táº£i má»›i={image_result['downloaded']}, "
-                f"Ä‘Ă£ cĂ³={image_result['skipped']}, "
-                f"lá»—i={image_result['failed']}"
+                "Ảnh local: "
+                f"tải mới={image_result['downloaded']}, "
+                f"đã có={image_result['skipped']}, "
+                f"lỗi={image_result['failed']}"
             )
 
         except KeyboardInterrupt:
-            print("\n\nÄĂ£ dá»«ng chÆ°Æ¡ng trĂ¬nh.")
+            print("\n\nĐã dừng chương trình.")
             break
 
         except Exception as error:
-            print(f"\nLá»—i: {error}")
+            print(f"\nLỗi: {error}")
 
 if __name__ == "__main__":
     main()

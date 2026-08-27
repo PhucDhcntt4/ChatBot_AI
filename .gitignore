@@ -3,8 +3,8 @@ __pycache__/
 *.pyc
 .venv/
 .pytest_cache/
-prompts/*
-!prompts/.gitkeep
+#prompts/*
+#!prompts/.gitkeep
 # Ignore data
 data/
 
@@ -16,3 +16,4 @@ products.json
 secrets/
 *.service.json
 secrets/
+log/

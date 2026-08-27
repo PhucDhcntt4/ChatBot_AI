@@ -1,5 +1,5 @@
+import inspect
 import re
-import unicodedata
 from typing import Any, Callable
 
 from app.config import PRODUCT_ALBUM_IMAGE_LIMIT
@@ -29,6 +29,7 @@ class ConversationExecutor:
             ConversationIntent.POLICY_QUESTION: self._policy,
             ConversationIntent.GENERAL_CHAT: self._general,
             ConversationIntent.UNKNOWN: self._unknown,
+            ConversationIntent.HUMAN_HANDOFF: self._human_handoff,
         }
 
     def execute(
@@ -103,32 +104,44 @@ class ConversationExecutor:
             image_urls=urls,
         )
 
-    @staticmethod
-    def _needs_size_knowledge(message: str, plan: ConversationPlan) -> bool:
-        normalized = unicodedata.normalize("NFD", message.casefold())
-        normalized = "".join(
-            character
-            for character in normalized
-            if unicodedata.category(character) != "Mn"
-        ).replace("đ", "d")
-        requested = {
-            str(item).strip().casefold()
-            for item in plan.requested_attributes
-        }
-        asks_size_advice = any(
-            phrase in normalized
-            for phrase in (
-                "tu van size",
-                "chon size",
-                "mang size nao",
-                "chan dai",
-                "chieu dai chan",
-                "do dai ban chan",
-            )
-        ) or bool(re.search(r"\b\d+(?:[.,]\d+)?\s*cm\b", normalized))
-        return asks_size_advice or bool(
-            requested.intersection({"size_advice", "size_guide"})
+    def _human_handoff(
+        self,
+        message,
+        plan,
+        context,
+    ) -> ExecutionResult:
+        return ExecutionResult(
+            success=True,
+            status="human_handoff_requested",
+            intent=plan.intent,
+            facts={
+                "human_handoff_requested":True,
+            },
         )
+
+    def _search_knowledge(
+        self,
+        question: str,
+        *,
+        categories: list[str] | None = None,
+    ) -> dict[str, Any]:
+        """Call RAG with category filtering when the adapter supports it."""
+        if not self.knowledge_search:
+            return {
+                "success": False,
+                "status": "knowledge_service_disabled",
+                "content": "",
+                "sources": [],
+            }
+        parameters = inspect.signature(self.knowledge_search).parameters.values()
+        supports_categories = any(
+            parameter.name == "categories"
+            or parameter.kind == inspect.Parameter.VAR_KEYWORD
+            for parameter in parameters
+        )
+        if supports_categories:
+            return self.knowledge_search(question, categories=categories)
+        return self.knowledge_search(question)
 
     @staticmethod
     def _payment_knowledge_query(plan: ConversationPlan) -> str | None:
@@ -187,10 +200,13 @@ class ConversationExecutor:
         knowledge_query = self._payment_knowledge_query(plan)
         if promotion_requested:
             knowledge_query = message
-        if self.knowledge_search and (
-            knowledge_query or self._needs_size_knowledge(message, plan)
-        ):
-            knowledge_result = self.knowledge_search(knowledge_query or message)
+        if plan.use_knowledge:
+            knowledge_query = plan.knowledge_query or knowledge_query or message
+        if self.knowledge_search and knowledge_query:
+            knowledge_result = self._search_knowledge(
+                knowledge_query,
+                categories=plan.knowledge_categories or None,
+            )
             if knowledge_result.get("success"):
                 knowledge_context = str(knowledge_result.get("content") or "")
                 sources = list(knowledge_result.get("sources") or [])
@@ -223,9 +239,23 @@ class ConversationExecutor:
             + ([reference["product_code"]] if reference else [])
         ))
         if plan.relation == "same_product_type" and reference:
-            found = self.products.recommend_same_type(
-                reference["product_type"], excluded, plan.requested_count
+            desired_size = str(
+                plan.requested_size or context.draft_size or ""
+            ).strip()
+            candidate_limit = max(plan.requested_count * 10, 50)
+            candidates = self.products.recommend_same_type(
+                reference["product_type"], excluded, candidate_limit
             )
+            if desired_size:
+                candidates = [
+                    product
+                    for product in candidates
+                    if desired_size in {
+                        str(size).strip()
+                        for size in product.get("available_sizes", [])
+                    }
+                ]
+            found = candidates[:plan.requested_count]
         else:
             found = self.products.recommend_by_query(
                 plan.search_query or message, plan.requested_count
@@ -241,7 +271,10 @@ class ConversationExecutor:
             return ExecutionResult(
                 success=False, status="knowledge_service_disabled", intent=plan.intent
             )
-        result = self.knowledge_search(message)
+        result = self._search_knowledge(
+            plan.knowledge_query or message,
+            categories=plan.knowledge_categories or None,
+        )
         return ExecutionResult(
             success=bool(result.get("success")), status=result.get("status", "unknown"),
             intent=plan.intent, knowledge_context=result.get("content", ""),

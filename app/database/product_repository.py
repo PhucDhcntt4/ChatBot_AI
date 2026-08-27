@@ -7,6 +7,69 @@ from app.database.connection import database_connection
 
 
 class ProductRepository:
+    @classmethod
+    def _requested_heights(cls, query: str) -> set[float]:
+        """Extract customer-facing heel/platform heights from a search query.
+
+        Vietnamese customers commonly use both ``cm`` and ``phân`` for the
+        same value (for example ``gót 7 phân``).  Keeping this constraint in
+        catalog retrieval prevents the presenter from receiving unrelated
+        products and then having to contradict the attached albums.
+        """
+        normalized = cls._normalize(query)
+        values: set[float] = set()
+        for raw_value in re.findall(
+            r"(?<!\d)(\d+(?:[.,]\d+)?)\s*(?:cm|phan)\b",
+            normalized,
+        ):
+            try:
+                values.add(float(raw_value.replace(",", ".")))
+            except ValueError:
+                continue
+        return values
+
+    @classmethod
+    def _height_values(cls, value: Any) -> set[float]:
+        normalized = cls._normalize(value)
+        values: set[float] = set()
+        for raw_value in re.findall(r"\d+(?:[.,]\d+)?", normalized):
+            try:
+                values.add(float(raw_value.replace(",", ".")))
+            except ValueError:
+                continue
+        return values
+
+    @staticmethod
+    def _presentation_description(value: Any) -> str:
+        """Keep marketing copy, but remove stale catalog attributes.
+
+        Shopify descriptions may still mention old colors/sizes after the
+        active variants have changed.  Structured product facts are built
+        from product_variants, so those claims must never be shown to the
+        presenter as an alternative source of truth.
+        """
+        description = str(value or "").strip()
+        if not description:
+            return ""
+
+        # Remove the structured tail commonly appended to Shopify copy.
+        description = re.split(
+            r"\s*-\s*(?:Mã\s+sản\s+phẩm|Mã|Màu(?:\s+sắc)?|Size|Giá)\s*:",
+            description,
+            maxsplit=1,
+            flags=re.IGNORECASE,
+        )[0]
+
+        # Also remove prose claims such as "mẫu có 3 màu: ..." because
+        # they can conflict with the currently active variants.
+        description = re.sub(
+            r"(?:^|(?<=[.!?]))\s*[^.!?]*\bcó\s+\d+\s+màu\b[^.!?]*[.!?]?",
+            " ",
+            description,
+            flags=re.IGNORECASE,
+        )
+        return re.sub(r"\s+", " ", description).strip()
+
     @staticmethod
     def _number(value: Any) -> int | float | None:
         if isinstance(value, Decimal):
@@ -196,7 +259,11 @@ class ProductRepository:
             "product_code": code,
             "product_name": product["title"],
             "product_type": product["product_type"],
-            "description": product["description"] or "",
+            # Description is presentation-only. Colors, sizes, prices and
+            # availability below come exclusively from product_variants.
+            "description": self._presentation_description(
+                product["description"]
+            ),
             "material": product["material"],
             "sole": product["sole"],
             "height": product["height"],
@@ -233,10 +300,20 @@ class ProductRepository:
             token for token in word_tokens(query)
             if token not in stopwords
         }
+        requested_heights = self._requested_heights(query)
+        normalized_query_tokens = set(self._normalize(query).split())
+        # "guốc" is a women's footwear request in this catalog.  It should
+        # not be allowed to resolve to SANDAL NAM merely because both titles
+        # contain the broad token "sandal".
+        wants_women = bool(
+            normalized_query_tokens.intersection({"nu", "guoc"})
+        )
+        wants_men = "nam" in normalized_query_tokens and not wants_women
         with database_connection() as connection:
             rows = connection.execute(
                 """
-                SELECT product_code, title, product_type, description, vendor, status
+                SELECT product_code, title, product_type, description, vendor,
+                       material, sole, height, status
                 FROM products ORDER BY id
                 """
             ).fetchall()
@@ -263,6 +340,18 @@ class ProductRepository:
                 continue
             title = str(row["title"] or "")
             product_type = str(row["product_type"] or "")
+            normalized_identity = self._normalize(
+                f"{title} {product_type}"
+            )
+            identity_tokens = set(normalized_identity.split())
+            if wants_women and "nam" in identity_tokens:
+                continue
+            if wants_men and "nu" in identity_tokens:
+                continue
+            if requested_heights:
+                product_heights = self._height_values(row["height"])
+                if not product_heights.intersection(requested_heights):
+                    continue
             title_tokens = word_tokens(title)
             type_tokens = word_tokens(re.sub(r"\([^)]*\)", " ", product_type))
             searchable_tokens = word_tokens(
@@ -290,6 +379,8 @@ class ProductRepository:
             comparable_query = raw_query if preserve_accents else normalized
             if comparable_query in comparable_title:
                 matches += 100
+            if requested_heights:
+                matches += 30
             if matches:
                 ranked.append((matches, str(row["product_code"])))
         ranked.sort(key=lambda item: item[0], reverse=True)
@@ -316,6 +407,19 @@ class ProductRepository:
         return [product for product in products if product]
 
     def recommend_by_query(self, query: str, limit: int) -> list[dict[str, Any]]:
+        # Recommendation constraints (height, gender, material, wording) must
+        # be ranked by ``search`` first.  The previous implementation jumped
+        # directly to random products of one resolved type, discarding phrases
+        # such as "5 phân" and producing unrelated albums.
+        matched = self.search(query=query, limit=limit)
+        if matched:
+            return matched
+        # A constrained request must fail honestly when the catalog has no
+        # match. Falling back to a random category item would attach images
+        # that contradict the response (for example a 4 cm men's sandal for
+        # a request containing 5 cm/7 cm).
+        if self._requested_heights(query):
+            return []
         resolved_type = self.resolve_product_type(query)
         if resolved_type:
             return self.recommend_same_type(

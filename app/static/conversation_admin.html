@@ -1,0 +1,173 @@
+<!doctype html>
+<html lang="vi">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width,initial-scale=1" />
+    <title>Hội thoại · Đông Hải AI</title>
+    <link rel="stylesheet" href="/static/css/admin_sidebar.css?v=20260824-1" />
+    <link
+      rel="stylesheet"
+      href="/static/css/admin_pages.css?v=20260826-conversations5"
+    />
+    <link rel="stylesheet" href="/static/css/chatbot.css?v=20260824-1" />
+  </head>
+  <body class="has-admin-sidebar">
+    <aside class="admin-sidebar">
+      <a class="admin-sidebar-brand" href="/admin/products"
+        ><img src="/static/assets/logo.jpg" alt="Đông Hải" /><span
+          >Đông Hải AI</span
+        ></a
+      >
+      <nav>
+        <a href="/admin/products"><span>◫</span>Sản phẩm</a>
+        <a href="/admin/knowledge"><span>▤</span>Knowledge</a>
+        <a href="/admin/prompts"><span>✎</span>Prompt</a>
+        <a class="active" href="/admin/conversations"
+          ><span>☰</span>Hội thoại</a
+        >
+      </nav>
+    </aside>
+    <div class="admin-page">
+      <header class="page-head">
+        <h1>Quản lý hội thoại</h1>
+        <p>Xem session người dùng theo từng channel và xóa lịch sử khi cần.</p>
+      </header>
+      <main class="page-content">
+        <section class="card conversation-card">
+          <div class="conversation-toolbar">
+            <div>
+              <h2>Danh sách người dùng</h2>
+              <p class="muted" id="sessionSummary">Đang tải dữ liệu…</p>
+            </div>
+            <div class="conversation-filters">
+              <select id="channelFilter" aria-label="Lọc theo channel">
+                <option value="">Tất cả channel</option>
+                <option value="web">Web</option>
+                <option value="telegram">Telegram</option>
+                <option value="facebook">Facebook</option>
+              </select>
+              <input
+                id="sessionSearch"
+                type="search"
+                placeholder="Tìm ID, tên, SĐT, nội dung…"
+              />
+              <button id="refreshSessions" type="button">Làm mới</button>
+            </div>
+          </div>
+          <div class="global-bot-control">
+            <div class="global-bot-copy">
+              <strong>Bot tự động toàn hệ thống</strong>
+              <small id="globalBotState">Đang bật cho toàn bộ hội thoại</small>
+            </div>
+            <label class="pause-duration-label" for="humanModeDuration">
+              Thời gian tạm dừng
+              <select id="humanModeDuration">
+                <option value="600">10 phút</option>
+                <option value="900">15 phút</option>
+                <option value="1200">20 phút</option>
+                <option value="1500">25 phút</option>
+                <option value="1800">30 phút</option>
+              </select>
+            </label>
+            <button
+              class="human-mode-toggle is-on"
+              id="toggleGlobalHumanMode"
+              type="button"
+              role="switch"
+              aria-checked="true"
+              aria-label="Bật hoặc tắt bot cho toàn bộ hội thoại"
+            >
+              <span class="toggle-thumb"></span>
+            </button>
+          </div>
+          <div class="notice" id="sessionNotice"></div>
+          <div class="table-wrap">
+            <table class="conversation-table">
+              <thead>
+                <tr>
+                  <th>Người dùng</th>
+                  <th>Channel</th>
+                  <th>Liên hệ</th>
+                  <th>Trạng thái</th>
+                  <th>Tin nhắn</th>
+                  <th>TTL</th>
+                  <th></th>
+                </tr>
+              </thead>
+              <tbody id="sessionRows">
+                <tr class="empty-row">
+                  <td colspan="7">Đang tải…</td>
+                </tr>
+              </tbody>
+            </table>
+          </div>
+          <div class="conversation-pagination">
+            <button id="previousPage" type="button">Trước</button
+            ><span id="pageLabel">Trang 1</span
+            ><button id="nextPage" type="button">Sau</button>
+          </div>
+        </section>
+      </main>
+    </div>
+    <div class="modal-overlay" id="conversationModal" hidden>
+      <div
+        class="modal conversation-modal"
+        role="dialog"
+        aria-modal="true"
+        aria-labelledby="conversationTitle"
+      >
+        <div class="modal-head">
+          <div class="titles">
+            <h3 id="conversationTitle">Chi tiết hội thoại</h3>
+            <div class="mono" id="conversationMeta"></div>
+          </div>
+          <button
+            class="modal-close"
+            id="closeConversation"
+            type="button"
+            aria-label="Đóng"
+          >
+            ×
+          </button>
+        </div>
+        <div class="modal-meta" id="conversationBadges"></div>
+        <div class="modal-body">
+          <div class="conversation-history" id="conversationHistory"></div>
+        </div>
+        <div class="modal-foot">
+          <span class="muted" id="conversationFooter"></span>
+          <div class="conversation-actions">
+            <div class="human-mode-control">
+              <span class="human-mode-copy">
+                <strong>Bot tự động</strong>
+                <small id="humanModeState">Đang bật</small>
+              </span>
+              <button
+                class="human-mode-toggle is-on"
+                id="toggleHumanMode"
+                type="button"
+                role="switch"
+                aria-checked="true"
+                aria-label="Bật hoặc tắt bot tự động"
+              >
+                <span class="toggle-thumb"></span>
+              </button>
+            </div>
+            <button
+              class="delete-session"
+              id="deleteCurrentSession"
+              type="button"
+            >
+              Xóa lịch sử
+            </button>
+          </div>
+        </div>
+      </div>
+    </div>
+    <script src="/static/js/admin_base.js?v=20260824-1"></script>
+    <script
+      src="/static/js/conversation_admin.js?v=20260826-tableswitch5"
+      defer
+    ></script>
+  </body>
+</html>

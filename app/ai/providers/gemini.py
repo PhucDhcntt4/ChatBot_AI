@@ -3,6 +3,7 @@ import os
 
 from google import genai
 from google.genai import types
+from pydantic import BaseModel
 
 from app.ai.base import AIProvider
 from app.config import (
@@ -60,6 +61,7 @@ class GeminiProvider(AIProvider):
                             "promotion_eligible": context.draft_promotion_eligible,
                         },
                         "cart_items": context.cart_items,
+                        "pending_items": context.pending_items,
                         "history": [item.model_dump() for item in context.history[-6:]],
                     },
                     "cta_candidates": {
@@ -114,3 +116,27 @@ class GeminiProvider(AIProvider):
             ),
         )
         return (response.text or "").strip()
+
+    def analyze_images(
+        self,
+        *,
+        instruction: str,
+        images: list[tuple[str, bytes, str]],
+        response_model: type[BaseModel],
+    ) -> BaseModel:
+        contents: list = [instruction]
+        for label, image_bytes, mime_type in images:
+            contents.extend([
+                label,
+                types.Part.from_bytes(data=image_bytes, mime_type=mime_type),
+            ])
+        response = self.client.models.generate_content(
+            model=self.model,
+            contents=contents,
+            config=types.GenerateContentConfig(
+                response_mime_type="application/json",
+                response_schema=response_model,
+                temperature=0,
+            ),
+        )
+        return response_model.model_validate_json(response.text or "{}")

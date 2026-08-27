@@ -55,6 +55,20 @@ class KnowledgeSearchService:
         self.min_similarity = min_similarity
         self.max_context_chars = max_context_chars
 
+    def matching_document_count(self) -> int:
+        """Count documents compatible with the active embedding setup."""
+        documents = self.repository.list_documents()
+        return sum(
+            1
+            for document in documents
+            if document.get("is_active", True)
+            and document.get("embedding_provider")
+            == self.embedding_service.provider_name
+            and document.get("embedding_model") == self.embedding_service.model
+            and int(document.get("embedding_dimension") or 0)
+            == self.embedding_service.dimension
+        )
+
     def search(
         self,
         question: str,

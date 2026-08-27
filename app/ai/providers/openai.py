@@ -1,7 +1,9 @@
 import json
 import os
+import base64
 
 from openai import OpenAI
+from pydantic import BaseModel
 
 from app.ai.base import AIProvider
 from app.config import (
@@ -79,3 +81,30 @@ class OpenAIProvider(AIProvider):
             ),
         )
         return response.output_text.strip()
+
+    def analyze_images(
+        self,
+        *,
+        instruction: str,
+        images: list[tuple[str, bytes, str]],
+        response_model: type[BaseModel],
+    ) -> BaseModel:
+        content: list[dict] = [{"type": "input_text", "text": instruction}]
+        for label, image_bytes, mime_type in images:
+            encoded = base64.b64encode(image_bytes).decode("ascii")
+            content.extend([
+                {"type": "input_text", "text": label},
+                {
+                    "type": "input_image",
+                    "image_url": f"data:{mime_type};base64,{encoded}",
+                    "detail": "high",
+                },
+            ])
+        response = self.client.responses.parse(
+            model=self.model,
+            input=[{"role": "user", "content": content}],
+            text_format=response_model,
+        )
+        if response.output_parsed is None:
+            raise RuntimeError("OpenAI không trả về kết quả nhận diện ảnh")
+        return response.output_parsed

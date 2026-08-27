@@ -1,0 +1,62 @@
+# Mỗi câu CTA nằm trên một dòng.
+# Tên section phải trùng với giá trị CTAType trong app/conversation/models.py.
+
+[ask_size]
+Anh/chị thường mang size bao nhiêu để em hỗ trợ chọn size phù hợp nhé ❤️
+Anh/chị đang mang size nào để em tư vấn size phù hợp hơn ạ?
+Anh/chị cho em biết size thường mang, em hỗ trợ anh/chị tiếp nhé.
+
+[choose_color]
+Anh/chị đang ưng màu nào để em hỗ trợ tư vấn thêm cho mình ạ❤️
+Trong các màu trên, anh/chị muốn xem kỹ màu nào ạ?
+Anh/chị thích màu nào để em hỗ trợ kiểm tra thêm nhé?
+
+[size_support]
+Anh/chị thường mang size bao nhiêu để em hỗ trợ chọn size vừa chân nhé ❤️
+Anh/chị cho em biết size thường mang để em tư vấn kỹ hơn ạ.
+Anh/chị muốn em hỗ trợ chọn size theo chiều dài bàn chân không ạ?
+
+[image_feedback]
+Anh/chị ưng mẫu nào thì báo em nhé, em kiểm tra hàng cho anh/chị ạ ❤️
+Anh/chị quan tâm mẫu nào thì nhắn em, em hỗ trợ kiểm tra và tư vấn thêm nhé ❤️
+Anh/chị chấm mẫu nào thì gửi em mẫu đó nhé, em hỗ trợ anh/chị đặt hàng ạ ❤️
+
+[choose_product]
+Anh/chị ưng mã nào thì nhắn em mã sản phẩm để em tư vấn chi tiết nhé ❤️
+Trong các mẫu trên, anh/chị muốn xem kỹ mẫu nào ạ?
+Anh/chị chọn giúp em mẫu anh/chị thích nhất, em gửi thêm màu và size nhé.
+
+[start_order]
+Anh/chị cho em biết màu, size và số lượng mong muốn để em ghi nhận nhé ❤️
+Anh/chị chốt màu nào, size bao nhiêu và số lượng mấy đôi ạ?
+Anh/chị gửi em màu, size cùng số lượng cần mua để em hỗ trợ tiếp nhé.
+
+[ask_quantity]
+Anh/chị cần số lượng bao nhiêu sản phẩm để em ghi nhận tiếp ạ?
+Anh/chị cho em xin số lượng sản phẩm muốn đặt nhé.
+Mẫu này anh/chị muốn lấy số lượng bao nhiêu ạ?
+
+[provide_contact]
+Anh/chị cho em xin {fields} để em ghi nhận tiếp ạ.
+Anh/chị gửi em thêm {fields} nhé ❤️
+Em xin bổ sung {fields} để hoàn thiện thông tin nhận hàng ạ.
+
+[choose_payment]
+Anh/chị chọn thanh toán COD khi nhận hàng hay chuyển khoản ạ?
+Anh/chị muốn thanh toán khi nhận hàng hay chuyển khoản giúp em nhé.
+Phương thức thanh toán của anh/chị là COD hay chuyển khoản ạ?
+
+[confirm_order]
+Anh/chị kiểm tra lại toàn bộ thông tin giúp em nhé ❤️
+Em nhờ anh/chị kiểm tra lại thông tin sản phẩm và nhận hàng ở trên ạ.
+Anh/chị xem lại các thông tin trên giúp em nhé.
+
+[apply_promotion]
+Anh/chị có muốn em áp dụng ưu đãi này vào đơn hàng hiện tại không ạ?
+Em áp dụng chương trình này vào đơn cho anh/chị nhé?
+Anh/chị xác nhận giúp em có sử dụng ưu đãi này cho đơn hiện tại không ạ?
+
+[provide_more_info]
+Anh/chị gửi em mã sản phẩm hoặc mô tả rõ hơn để em kiểm tra chính xác nhé.
+Anh/chị cho em thêm mã hoặc loại sản phẩm đang tìm để em hỗ trợ tiếp ạ.
+Anh/chị cung cấp thêm thông tin về mẫu cần tìm giúp em nhé.

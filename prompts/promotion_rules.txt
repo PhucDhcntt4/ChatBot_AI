@@ -1,0 +1,119 @@
+QUY TẮC CHƯƠNG TRÌNH KHUYẾN MÃI — NGUỒN CẤU HÌNH CÓ THỂ CHỈNH SỬA
+
+Đây là nguồn chương trình khuyến mãi hiện hành dùng chung cho Planner và Presenter.
+Nội dung trong file này được ưu tiên hơn mọi ví dụ khuyến mãi ở prompt khác.
+
+QUY TẮC TRÍCH XUẤT CHO PLANNER
+
+- Khi khách hỏi, chọn, áp dụng, thay đổi hoặc hủy ưu đãi, thêm "promotion" vào requested_attributes.
+- Khi khách chỉ hỏi chương trình nào phù hợp, được giảm bao nhiêu, có ưu đãi nào hoặc có đủ
+  điều kiện không: đặt promotion_action="recommend". Tìm ưu đãi phù hợp nhất với hóa đơn
+  hiện tại nhưng chưa ghi nhận hoặc trừ tiền; Presenter sẽ hỏi khách có muốn áp dụng không.
+- Chỉ đặt promotion_action="apply" khi khách đồng ý rõ ràng sử dụng ưu đãi cho đơn hiện tại,
+  ví dụ "áp dụng cho anh", "dùng mã này", "ok áp vào đơn" hoặc cách nói tương đương.
+- Khi khách yêu cầu bỏ ưu đãi khỏi đơn: đặt promotion_action="remove".
+- Khi lượt hiện tại không liên quan khuyến mãi: promotion_action=null.
+- Chỉ điền promotion_name khi xác định được đúng tên chương trình khách chọn.
+- Chỉ điền promotion_code khi chương trình có mã hoặc khách cung cấp mã.
+- promotion_discount_amount là tổng số tiền được giảm trực tiếp trên hóa đơn, kiểu số nguyên VND.
+- Quà tặng hoặc voucher dùng cho lần sau không được quy đổi vào promotion_discount_amount;
+  mô tả chúng trong promotion_benefit.
+- promotion_eligible=true chỉ khi đơn nháp và thông tin khách đã đáp ứng đầy đủ điều kiện.
+- promotion_eligible=false khi chắc chắn không đủ điều kiện.
+- Nếu thiếu dữ liệu để kiểm tra thì promotion_eligible=null và không tự đoán số tiền giảm.
+- Khi khách không đề cập khuyến mãi ở lượt hiện tại, giữ các trường promotion_* là null;
+  backend sẽ giữ chương trình đã ghi nhận trước đó trong đơn nháp.
+- Không ghi cụm "AI tạm tính" vào nội dung gửi khách.
+
+CHƯƠNG TRÌNH HIỆN HÀNH
+
+1. Ưu đãi Sinh nhật tháng 08
+
+Khách hàng cũ
+
+- Voucher 200.000đ cho đơn từ 1.000.000đ.
+- Hoặc Voucher 100.000đ cho đơn từ 500.000đ + Voucher 100.000đ dùng lần sau (HSD 30/09/2026).
+
+Khách hàng mới
+
+- Mua 01 sản phẩm để trở thành khách hàng cũ rồi được áp dụng ưu đãi trên.
+
+Điều kiện
+
+- Không áp dụng cùng chương trình quà tặng khác.
+- Không áp dụng khi mua Phiếu Quà Tặng, Phiếu Nhận Giày, Hợp Đồng.
+
+Phạm vi
+ Offline + Online.
+ Không áp dụng sàn TMĐT.
+ Không áp dụng AEON Mall Tân Phú và AEON Mall Bình Tân.
+
+Thời gian
+
+Đến hết tháng sinh nhật của khách.
+
+----
+
+2. Your Shoes, Your Choice
+
+Nội dung
+
+- Mua 01 đôi Sneaker tặng 02 cặp Charm.
+
+Áp dụng cho mã
+
+- GFD01, GFD02, GFD03, GFD04, GFD06, GFD07, GFD09, GFD15.
+
+Điều kiện
+
+- Được áp dụng cùng các chương trình khác (bao gồm Voucher Sinh nhật).
+- Không áp dụng khi mua Phiếu Quà Tặng.
+-
+
+GFD02, GFD03, GFD04, GFD06, GFD07, GFD09, GFD15.
+
+Điều kiện
+
+- Được áp dụng cùng các chương trình khác (bao gồm Voucher Sinh nhật).
+- Không áp dụng khi mua Phiếu Quà Tặng.
+-
+
+Charm chỉ dùng để tặng, không quy đổi tiền mặt.
+
+Phạm vi
+
+- Chỉ áp dụng tại cửa hàng (bao gồm Mall).
+- Không áp dụng Online và sàn TMĐT.
+
+Thời gian
+
+- Từ 15/03/2026 đến khi hết Charm hoặc hết Sneaker.
+
+---
+
+3. Khảo sát T8 - Nhận quà Cotton Pads
+
+Nội dung
+
+- Sau khi mua hàng, khách quét QR hoàn thành Google Form để nhận 01 hộp Cotton Pads.
+
+Điều kiện
+
+- Mỗi đơn nhận tối đa 01 phần quà.
+- Không khảo sát sẽ không nhận quà.
+- Được áp dụng cùng các chương trình khác.
+- KHÔNG áp dụng cho các đơn chỉ mua danh mục linh tinh (vớ, xi, lót...)
+
+Phạm vi
+
+- Chỉ áp dụng tại cửa hàng (bao gồm Mall).
+
+Thời gian
+
+- Từ 01/08/2026 đến khi hết quà tặng Cotton Pads.
+
+HƯỚNG DẪN BẢO TRÌ
+
+- Khi có chương trình mới, thêm một mục mới theo cùng cấu trúc.
+- Khi chương trình hết hạn, xóa mục hoặc ghi rõ "Trạng thái: Ngừng áp dụng".
+- Không sửa code khi thay tên, điều kiện, mã, giá trị giảm hoặc quà tặng.

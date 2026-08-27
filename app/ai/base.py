@@ -1,10 +1,16 @@
 from abc import ABC, abstractmethod
+from typing import TypeVar
+
+from pydantic import BaseModel
 
 from app.conversation.models import (
     ConversationContext,
     ConversationPlan,
     ExecutionResult,
 )
+
+
+VisionResult = TypeVar("VisionResult", bound=BaseModel)
 
 
 class AIProvider(ABC):
@@ -26,3 +32,15 @@ class AIProvider(ABC):
         context: ConversationContext,
     ) -> str:
         raise NotImplementedError
+
+    def analyze_images(
+        self,
+        *,
+        instruction: str,
+        images: list[tuple[str, bytes, str]],
+        response_model: type[VisionResult],
+    ) -> VisionResult:
+        """Analyze labeled images and return a provider-neutral model."""
+        raise NotImplementedError(
+            f"Provider {self.provider_name} chưa hỗ trợ nhận diện hình ảnh"
+        )
