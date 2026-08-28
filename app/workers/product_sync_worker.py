@@ -9,7 +9,7 @@ from app.services.product_sync_service import product_sync_manager
 logger = logging.getLogger("product_sync_worker")
 
 
-def run_worker(*, once: bool = False, poll_interval: float = 2.0) -> None:
+def run_worker(*, once: bool = False) -> None:
     logger.info("Product sync worker đã sẵn sàng")
     recovered = product_sync_manager.recover_stale_jobs()
     if recovered:
@@ -47,10 +47,9 @@ def run_worker(*, once: bool = False, poll_interval: float = 2.0) -> None:
 def main() -> None:
     parser = argparse.ArgumentParser(description="Worker đồng bộ sản phẩm và embedding")
     parser.add_argument("--once", action="store_true")
-    parser.add_argument("--poll-interval", type=float, default=2.0)
     args = parser.parse_args()
     setup_logging(service_name="product_sync_worker")
-    run_worker(once=args.once, poll_interval=max(0.2, args.poll_interval))
+    run_worker(once=args.once)
 
 
 if __name__ == "__main__":

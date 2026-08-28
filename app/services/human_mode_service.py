@@ -16,6 +16,43 @@ logger = logging.getLogger("uvicorn.error")
 
 class HumanModeService:
     KEY_PREFIX = "donghai:human_mode"
+    DEFAULT_TTL_KEY = f"{KEY_PREFIX}:settings:default_ttl_seconds"
+
+    @staticmethod
+    def _validate_ttl(ttl_seconds: int) -> int:
+        value = int(ttl_seconds)
+        if value < 60 or value > 604800:
+            raise ValueError(
+                "Thời gian tạm dừng bot phải từ 1 phút đến 7 ngày"
+            )
+        return value
+
+    def get_default_ttl(self) -> int:
+        """Lấy thời gian đã lưu trong Redis, fallback về cấu hình .env."""
+        fallback = self._validate_ttl(HUMAN_MODE_TTL_SECONDS)
+        try:
+            stored = redis_client.get(self.DEFAULT_TTL_KEY)
+        except RedisError:
+            return fallback
+
+        if not isinstance(stored, (str, bytes, int)):
+            return fallback
+        try:
+            return self._validate_ttl(int(stored))
+        except (TypeError, ValueError):
+            return fallback
+
+    def set_default_ttl(self, ttl_seconds: int) -> int:
+        """Lưu bền vững thời gian mặc định trong Redis (không đặt TTL)."""
+        value = self._validate_ttl(ttl_seconds)
+        try:
+            redis_client.set(self.DEFAULT_TTL_KEY, value)
+        except RedisError as error:
+            raise RuntimeError(
+                "Không thể lưu thời gian tạm dừng bot trong Redis"
+            ) from error
+        logger.info("HUMAN MODE DEFAULT TTL UPDATED ttl=%s", value)
+        return value
 
     @classmethod
     def _key(cls, channel: str, user_id: str) -> str:
@@ -50,13 +87,11 @@ class HumanModeService:
         activated_by: str = "bot",
         ttl_seconds: int | None = None,
     ) -> None:
-        effective_ttl = (
-            HUMAN_MODE_TTL_SECONDS
+        effective_ttl = self._validate_ttl(
+            self.get_default_ttl()
             if ttl_seconds is None
-            else int(ttl_seconds)
+            else ttl_seconds
         )
-        if effective_ttl < 60 or effective_ttl > 604800:
-            raise ValueError("Thời gian tạm dừng bot phải từ 1 phút đến 7 ngày")
         activated_at = datetime.now(timezone.utc)
         payload = {
             "enabled": True,

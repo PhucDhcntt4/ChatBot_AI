@@ -192,11 +192,13 @@ class ConversationService:
         logger.info(
             "V2 PLAN channel=%s session=%s intent=%s code=%s query=%s "
             "rag=%s rag_query=%s rag_categories=%s "
+            "features_include=%s features_exclude=%s "
             "color=%s size=%s quantity=%s quantity_explicit=%s requested_items=%s buying=%s suggested_cta=%s "
             "cta_index=%s send_images=%s explicit_image=%s time=%.3fs",
             channel, session_id, plan.intent.value, plan.reference_product_code,
             plan.search_query, plan.use_knowledge, plan.knowledge_query,
-            plan.knowledge_categories, plan.requested_color, plan.requested_size,
+            plan.knowledge_categories, plan.include_features,
+            plan.exclude_features, plan.requested_color, plan.requested_size,
             plan.requested_quantity, plan.quantity_explicitly_provided,
             [item.model_dump(mode="json") for item in plan.requested_items],
             plan.buying_intent,

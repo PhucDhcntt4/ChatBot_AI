@@ -7,9 +7,8 @@ from pydantic import BaseModel
 
 from app.ai.base import AIProvider
 from app.config import (
+    CONVERSATION_INSTRUCTION_PATH,
     OPENAI_MODEL,
-    PLANNER_PROMPT_PATH,
-    PRESENTER_PROMPT_PATH,
     PROMOTION_RULES_PATH,
 )
 from app.conversation.models import (
@@ -29,8 +28,9 @@ class OpenAIProvider(AIProvider):
             raise RuntimeError("Thiếu OPENAI_API_KEY trong file .env")
         self.client = OpenAI(api_key=api_key)
         self.model = OPENAI_MODEL
-        self.planner_prompt = PLANNER_PROMPT_PATH.read_text(encoding="utf-8")
-        self.presenter_prompt = PRESENTER_PROMPT_PATH.read_text(encoding="utf-8")
+        self.instruction_prompt = CONVERSATION_INSTRUCTION_PATH.read_text(
+            encoding="utf-8"
+        )
         self.promotion_rules = PROMOTION_RULES_PATH.read_text(encoding="utf-8")
 
     def create_plan(
@@ -38,7 +38,14 @@ class OpenAIProvider(AIProvider):
     ) -> ConversationPlan:
         response = self.client.responses.parse(
             model=self.model,
-            instructions=self.planner_prompt + "\n\n" + self.promotion_rules,
+            instructions=(
+                self.instruction_prompt
+                + "\n\n# CHẾ ĐỘ HIỆN TẠI: ĐIỀU PHỐI TOOL\n"
+                + "Chỉ phân tích yêu cầu và trả ConversationPlan đúng schema. "
+                + "Không viết câu trả lời cho khách."
+                + "\n\n"
+                + self.promotion_rules
+            ),
             input=json.dumps(
                 {
                     "message": message,
@@ -66,7 +73,15 @@ class OpenAIProvider(AIProvider):
         verified_result = result.model_dump(mode="json")
         response = self.client.responses.create(
             model=self.model,
-            instructions=self.presenter_prompt + "\n\n" + self.promotion_rules,
+            instructions=(
+                self.instruction_prompt
+                + "\n\n# CHẾ ĐỘ HIỆN TẠI: TRẢ LỜI KHÁCH\n"
+                + "Chỉ viết câu trả lời cuối dựa trên verified_result. "
+                + "Không gọi tool, không tự tạo dữ liệu và không trả JSON. "
+                + "CTA chỉ dùng verified_result.cta_text và chỉ xuất hiện một lần."
+                + "\n\n"
+                + self.promotion_rules
+            ),
             input=json.dumps(
                 {
                     "customer_message": message,

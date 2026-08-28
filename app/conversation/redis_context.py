@@ -65,8 +65,9 @@ class RedisConversationContextStore:
         context.history.append(HistoryItem(role=role, text=text))
         context.history = context.history[-HISTORY_LIMIT:]
 
-    def reset(self, session_id: str, channel: str) -> None:
-        self.redis.delete(self._key(channel, session_id))
+    def reset(self, session_id: str, channel: str) -> bool:
+        """Xóa context đúng channel/session và báo key có tồn tại hay không."""
+        return bool(self.redis.delete(self._key(channel, session_id)))
 
     def list_sessions(self) -> list[dict[str, Any]]:
         sessions: list[dict[str, Any]] = []

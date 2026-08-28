@@ -10,11 +10,9 @@ load_dotenv(PROJECT_ROOT / ".env")
 PROMPT_DIR = PROJECT_ROOT / "prompts"
 DATA_DIR = PROJECT_ROOT / "data"
 KNOWLEDGE_DIR = PROJECT_ROOT / "knowledge"
-PLANNER_PROMPT_PATH = PROMPT_DIR / "conversation_planner.txt"
-PRESENTER_PROMPT_PATH = PROMPT_DIR / "conversation_presenter.txt"
+CONVERSATION_INSTRUCTION_PATH = PROMPT_DIR / "instruction.txt"
 CTA_TEMPLATE_PATH = PROMPT_DIR / "cta_templates.txt"
 FAST_RESPONSE_PATH = PROMPT_DIR / "fast_responses.txt"
-HUMAN_HANDOFF_REPLY_PATH = PROMPT_DIR / "human_handoff_reply.txt"
 PROMOTION_RULES_PATH = PROMPT_DIR / "promotion_rules.txt"
 
 DATABASE_URL = os.getenv("DATABASE_URL", "").strip()
@@ -119,11 +117,6 @@ VECTOR_MAX_CANDIDATES = int(os.getenv("VECTOR_MAX_CANDIDATES", "3"))
 VECTOR_REFERENCES_PER_PRODUCT = int(
     os.getenv("VECTOR_REFERENCES_PER_PRODUCT", "2")
 )
-
-REDIS_HOST = os.getenv("REDIS_HOST", "localhost").strip()
-REDIS_PORT = int(os.getenv("REDIS_PORT", "6379"))
-REDIS_DB = int(os.getenv("REDIS_DB", "0"))
-REDIS_TTL = int(os.getenv("REDIS_TTL", "300"))
 
 #HUMAN
 

@@ -10,7 +10,7 @@
     />
     <link
       rel="stylesheet"
-      href="/static/css/admin_pages.css?v=20260817-overflow1"
+      href="/static/css/admin_pages.css?v=20260828-prompt-actions1"
     />
     <link rel="stylesheet" href="/static/css/chatbot.css?v=20260824-1" />
   </head>
@@ -49,27 +49,34 @@
             <div class="editor-head">
               <div>
                 <h2 id="promptTitle">Chọn một prompt</h2>
-                <div class="editor-meta" id="promptMeta"></div>
+                <div class="file-pill" id="promptMeta"></div>
+              </div>
+              <div class="actions prompt-editor-actions">
+                <span class="editor-count" id="editorCount"></span
+                ><span class="save-state" id="saveState">Chưa chọn file</span
+                ><button id="reloadPrompt" type="button" disabled>
+                  Tải lại
+                </button
+                ><button id="savePrompt" type="button" disabled>
+                  Lưu và áp dụng
+                </button>
               </div>
             </div>
             <textarea
               id="promptEditor"
               disabled
+              spellcheck="false"
               placeholder="Chọn file bên trái để chỉnh sửa"
             ></textarea>
-            <div class="actions">
-              <span class="save-state" id="saveState">Chưa chọn file</span
-              ><button id="reloadPrompt" type="button" disabled>Tải lại</button
-              ><button id="savePrompt" type="button" disabled>
-                Lưu và áp dụng
-              </button>
-            </div>
             <div class="notice" id="promptNotice"></div>
           </section>
         </div>
       </main>
     </div>
     <script src="/static/js/admin_base.js?v=20260824-1"></script>
-    <script src="/static/js/prompt_admin.js?v=20260814-1" defer></script>
+    <script
+      src="/static/js/prompt_admin.js?v=20260826-promptfont1"
+      defer
+    ></script>
   </body>
 </html>

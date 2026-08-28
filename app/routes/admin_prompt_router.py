@@ -13,14 +13,12 @@ router = APIRouter(prefix="/admin/prompts", tags=["Prompt Admin"])
 PAGE_PATH = Path(__file__).resolve().parent.parent / "static" / "prompt_admin.html"
 VERSIONS_DIR = PROMPT_DIR / ".versions"
 PROMPT_FILES = {
-    "conversation_planner.txt": "Planner hội thoại",
-    "conversation_presenter.txt": "Presenter hội thoại",
+    "instruction.txt": "Instruction hội thoại",
     "image_intent.txt": "Phân loại ảnh",
     "product_recognition.txt": "Xác minh sản phẩm",
     "product_reply.txt": "Trả lời nhận diện ảnh",
     "cta_templates.txt": "Câu CTA",
     "fast_responses.txt": "Câu trả lời nhanh",
-    "human_handoff_reply.txt": "Thông báo chuyển nhân viên",
     "promotion_rules.txt": "Chương trình khuyến mãi",
 }
 
@@ -45,10 +43,8 @@ def _validate(name: str, content: str) -> None:
 def _apply_runtime(request: Request, name: str, content: str) -> None:
     conversation = getattr(request.app.state, "conversation_service", None)
     image_service = getattr(request.app.state, "image_conversation_service", None)
-    if name == "conversation_planner.txt" and conversation:
-        conversation.ai.planner_prompt = content
-    elif name == "conversation_presenter.txt" and conversation:
-        conversation.ai.presenter_prompt = content
+    if name == "instruction.txt" and conversation:
+        conversation.ai.instruction_prompt = content
     elif name == "promotion_rules.txt" and conversation:
         conversation.ai.promotion_rules = content
     elif name == "image_intent.txt" and image_service:
@@ -61,11 +57,6 @@ def _apply_runtime(request: Request, name: str, content: str) -> None:
         parsed = parse_cta_templates(content, name)
         CTA_TEMPLATES.clear()
         CTA_TEMPLATES.update(parsed)
-    elif name == "human_handoff_reply.txt":
-        if conversation:
-            conversation.presenter.human_handoff_reply = content.strip()
-        if image_service:
-            image_service.presenter.human_handoff_reply = content.strip()
 
 
 @router.get("", response_class=HTMLResponse)

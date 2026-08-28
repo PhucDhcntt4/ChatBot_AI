@@ -140,6 +140,40 @@ class ProductSyncJobStoreTests(unittest.TestCase):
         self.assertEqual(failed["status"], "failed")
         self.assertEqual(redis.lists[manager.processing_key], [])
 
+    def test_queued_job_can_be_cancelled(self) -> None:
+        redis = FakeRedis()
+        manager = ProductSyncManager(redis)
+        job = manager.create(["FE04"])
+
+        cancelled = manager.cancel(job.id)
+
+        self.assertEqual(cancelled["status"], "cancelled")
+        self.assertEqual(redis.lists[manager.queue_key], [])
+        self.assertIsNone(manager.claim_next())
+
+    def test_claimed_job_receives_cancel_request(self) -> None:
+        redis = FakeRedis()
+        manager = ProductSyncManager(redis)
+        job = manager.create(["FE04"])
+        self.assertEqual(manager.claim_next(), job.id)
+
+        cancelling = manager.cancel(job.id)
+
+        self.assertEqual(cancelling["status"], "cancel_requested")
+        self.assertTrue(manager._finish_cancelled(job.id))
+        self.assertEqual(manager.get(job.id)["status"], "cancelled")
+
+    def test_admin_sync_can_create_job_above_import_limit(self) -> None:
+        redis = FakeRedis()
+        manager = ProductSyncManager(redis)
+        codes = [f"SKU{index:04d}" for index in range(1001)]
+
+        with self.assertRaisesRegex(ValueError, "1.000"):
+            manager.create(codes)
+
+        job = manager.create(codes, max_skus=None)
+        self.assertEqual(len(job.skus), 1001)
+
 
 if __name__ == "__main__":
     unittest.main()

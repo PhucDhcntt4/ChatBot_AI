@@ -67,6 +67,10 @@ class ProductSyncManager:
             "REDIS_SYNC_JOB_PREFIX",
             "donghai:sync:job",
         )
+        self.cancel_prefix = os.getenv(
+            "REDIS_SYNC_CANCEL_PREFIX",
+            "donghai:sync:cancel",
+        )
         self.job_ttl = int(
             os.getenv("REDIS_SYNC_JOB_TTL_SECONDS", "86400")
         )
@@ -90,6 +94,12 @@ class ProductSyncManager:
         ):
             raise ValueError("Mã tác vụ không hợp lệ.")
         return f"{self.job_prefix}:{job_id}"
+
+    def _cancel_key(self, job_id: str) -> str:
+        # Dùng cùng quy tắc kiểm tra ID với khóa job để không cho phép
+        # người dùng tạo Redis key tùy ý qua endpoint quản trị.
+        self._job_key(job_id)
+        return f"{self.cancel_prefix}:{job_id}"
 
     @staticmethod
     def normalize_skus(values: list[str]) -> list[str]:
@@ -117,12 +127,20 @@ class ProductSyncManager:
         except (TypeError, ValueError, json.JSONDecodeError):
             return None
 
-    def create(self, skus: list[str]) -> SyncJob:
+    def create(
+        self,
+        skus: list[str],
+        *,
+        max_skus: int | None = 1000,
+    ) -> SyncJob:
         normalized = self.normalize_skus(skus)
         if not normalized:
             raise ValueError("Danh sách không có mã sản phẩm hợp lệ.")
-        if len(normalized) > 1000:
-            raise ValueError("Mỗi lần chỉ được import tối đa 1.000 mã.")
+        if max_skus is not None and len(normalized) > max_skus:
+            raise ValueError(
+                f"Mỗi lần chỉ được import tối đa {max_skus:,} mã."
+                .replace(",", ".")
+            )
         job = SyncJob(id=uuid.uuid4().hex, skus=normalized)
         with self.redis.pipeline() as pipeline:
             pipeline.set(
@@ -139,6 +157,55 @@ class ProductSyncManager:
     def get(self, job_id: str) -> dict[str, Any] | None:
         job = self._load(job_id)
         return job.public() if job else None
+
+    def cancel(self, job_id: str) -> dict[str, Any] | None:
+        job = self._load(job_id)
+        if not job:
+            return None
+        if job.status in {
+            "completed", "completed_with_errors", "failed", "cancelled"
+        }:
+            return job.public()
+
+        self.redis.set(self._cancel_key(job.id), "1", ex=self.job_ttl)
+        now = datetime.now(timezone.utc).isoformat()
+        if job.status == "queued":
+            self.redis.lrem(self.queue_key, 0, job.id)
+            job.status = "cancelled"
+            job.phase = "cancelled"
+            job.phase_label = "Đã dừng đồng bộ"
+            job.current_sku = None
+            job.completed_at = now
+            job.messages.append("Tác vụ đã được dừng trước khi worker xử lý.")
+        else:
+            job.status = "cancel_requested"
+            job.phase = "cancel_requested"
+            job.phase_label = "Đang dừng tại bước an toàn gần nhất"
+            job.messages.append("Đã tiếp nhận yêu cầu dừng đồng bộ.")
+        self._save(job)
+        return job.public()
+
+    def _is_cancel_requested(self, job_id: str) -> bool:
+        try:
+            return bool(self.redis.get(self._cancel_key(job_id)))
+        except ValueError:
+            return False
+
+    def _finish_cancelled(self, job_id: str) -> bool:
+        if not self._is_cancel_requested(job_id):
+            return False
+        job = self._load(job_id)
+        if not job:
+            return True
+        if job.status != "cancelled":
+            job.status = "cancelled"
+            job.phase = "cancelled"
+            job.phase_label = "Đã dừng đồng bộ"
+            job.current_sku = None
+            job.completed_at = datetime.now(timezone.utc).isoformat()
+            job.messages.append("Worker đã dừng tác vụ tại điểm an toàn.")
+            self._save(job)
+        return True
 
     def claim_next(self) -> str | None:
         while True:
@@ -183,6 +250,11 @@ class ProductSyncManager:
         for job_id in job_ids:
             job = self._load(job_id)
             if not job:
+                self.acknowledge(job_id)
+                continue
+
+            if self._is_cancel_requested(job_id):
+                self._finish_cancelled(job_id)
                 self.acknowledge(job_id)
                 continue
 
@@ -253,6 +325,9 @@ class ProductSyncManager:
         if not job:
             self.acknowledge(job_id)
             raise ValueError(f"Không tìm thấy tác vụ {job_id}.")
+        if self._finish_cancelled(job_id):
+            self.acknowledge(job_id)
+            return
         if job.status not in {"queued", "claimed"}:
             self.acknowledge(job_id)
             return
@@ -261,11 +336,15 @@ class ProductSyncManager:
         imported: list[dict[str, Any]] = []
         try:
             for index, sku in enumerate(job.skus):
+                if self._finish_cancelled(job_id):
+                    return
                 job.current_sku = sku
                 self._message(job, f"Đang lấy {sku} từ Shopify…")
                 try:
                     self._phase(job, "shopify", f"Đang lấy {sku} từ Shopify")
                     products = find_products_by_sku(sku)
+                    if self._finish_cancelled(job_id):
+                        return
                     self.heartbeat(job)
                     if not products:
                         raise ValueError("Không tìm thấy sản phẩm ACTIVE.")
@@ -275,18 +354,24 @@ class ProductSyncManager:
                     self._phase(job, "catalog", f"Đang lưu catalog {sku}")
                     for product in products:
                         save_product(product)
+                    if self._finish_cancelled(job_id):
+                        return
                     self.heartbeat(job)
                     job.completed_units = index * 4 + 2
                     self._save(job)
 
                     self._phase(job, "images", f"Đang tải ảnh {sku}")
                     image_result = sync_product_images(products, remove_stale=False)
+                    if self._finish_cancelled(job_id):
+                        return
                     self.heartbeat(job)
                     job.completed_units = index * 4 + 3
                     self._save(job)
 
                     self._phase(job, "database", f"Đang import database {sku}")
                     sync_run_id = import_products_to_database(products)
+                    if self._finish_cancelled(job_id):
+                        return
                     self.heartbeat(job)
                     job.completed_units = index * 4 + 4
                     imported.extend(products)
@@ -310,10 +395,14 @@ class ProductSyncManager:
                     self._save(job)
 
             if imported:
+                if self._finish_cancelled(job_id):
+                    return
                 self._phase(job, "embedding", "Đang tạo embedding cho ảnh mới")
                 self._message(job, "Đang tạo embedding cho ảnh mới…")
                 try:
                     result = build_embeddings()
+                    if self._finish_cancelled(job_id):
+                        return
                     self.heartbeat(job)
                     self._message(
                         job,

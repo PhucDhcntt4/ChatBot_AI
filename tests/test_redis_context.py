@@ -87,9 +87,11 @@ class RedisConversationContextStoreTests(unittest.TestCase):
         context = ConversationContext(session_id="session-2", channel="web")
         self.store.save(context)
 
-        self.store.reset("session-2", "web")
+        deleted = self.store.reset("session-2", "web")
 
+        self.assertTrue(deleted)
         self.assertNotIn("test:conversation:web:session-2", self.redis.values)
+        self.assertFalse(self.store.reset("session-2", "web"))
 
     def test_channels_are_isolated(self) -> None:
         web = ConversationContext(

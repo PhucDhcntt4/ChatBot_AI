@@ -7,7 +7,7 @@
     <link rel="stylesheet" href="/static/css/admin_sidebar.css?v=20260824-1" />
     <link
       rel="stylesheet"
-      href="/static/css/admin_pages.css?v=20260826-conversations5"
+      href="/static/css/admin_pages.css?v=20260828-time1"
     />
     <link rel="stylesheet" href="/static/css/chatbot.css?v=20260824-1" />
   </head>
@@ -19,18 +19,18 @@
         ></a
       >
       <nav>
-        <a href="/admin/products"><span>◫</span>Sản phẩm</a>
-        <a href="/admin/knowledge"><span>▤</span>Knowledge</a>
+        <a href="/admin/products"><span>📦</span>Sản phẩm</a>
+        <a href="/admin/knowledge"><span>📖</span>Knowledge</a>
         <a href="/admin/prompts"><span>✎</span>Prompt</a>
         <a class="active" href="/admin/conversations"
-          ><span>☰</span>Hội thoại</a
+          ><span>👤</span>Hội thoại</a
         >
       </nav>
     </aside>
     <div class="admin-page">
       <header class="page-head">
         <h1>Quản lý hội thoại</h1>
-        <p>Xem session người dùng theo từng channel và xóa lịch sử khi cần.</p>
+        <p>Xem và theo dõi lịch sử người dùng theo từng channel.</p>
       </header>
       <main class="page-content">
         <section class="card conversation-card">
@@ -90,7 +90,7 @@
                   <th>Liên hệ</th>
                   <th>Trạng thái</th>
                   <th>Tin nhắn</th>
-                  <th>TTL</th>
+                  <th>Cache Redis</th>
                   <th></th>
                 </tr>
               </thead>
@@ -155,18 +155,48 @@
             </div>
             <button
               class="delete-session"
-              id="deleteCurrentSession"
+              id="clearCurrentCache"
               type="button"
             >
-              Xóa lịch sử
+              Xóa cache
             </button>
           </div>
         </div>
       </div>
     </div>
+    <div
+      class="delete-confirm-overlay"
+      id="clearCacheConfirmModal"
+      role="dialog"
+      aria-modal="true"
+      aria-labelledby="clearCacheConfirmTitle"
+      hidden
+    >
+      <section class="delete-confirm-dialog">
+        <div class="delete-confirm-icon" aria-hidden="true">!</div>
+        <h2 id="clearCacheConfirmTitle">Xóa cache hội thoại?</h2>
+        <p id="clearCacheConfirmText"></p>
+        <div class="delete-confirm-warning">
+          Bot sẽ quên ngữ cảnh và đơn nháp hiện tại của phiên này. Toàn bộ
+          lịch sử PostgreSQL vẫn được giữ và tiếp tục hiển thị để theo dõi.
+        </div>
+        <div class="delete-confirm-actions">
+          <button
+            id="clearCacheCancel"
+            class="delete-confirm-cancel"
+            type="button"
+          >
+            Hủy
+          </button>
+          <button id="clearCacheConfirm" type="button">
+            Xác nhận xóa cache
+          </button>
+        </div>
+      </section>
+    </div>
     <script src="/static/js/admin_base.js?v=20260824-1"></script>
     <script
-      src="/static/js/conversation_admin.js?v=20260826-tableswitch5"
+      src="/static/js/conversation_admin.js?v=20260828-time1"
       defer
     ></script>
   </body>

@@ -7,9 +7,8 @@ from pydantic import BaseModel
 
 from app.ai.base import AIProvider
 from app.config import (
+    CONVERSATION_INSTRUCTION_PATH,
     GEMINI_MODEL,
-    PLANNER_PROMPT_PATH,
-    PRESENTER_PROMPT_PATH,
     PROMOTION_RULES_PATH,
 )
 from app.conversation.models import (
@@ -29,8 +28,9 @@ class GeminiProvider(AIProvider):
             raise RuntimeError("Thiếu GEMINI_API_KEY trong file .env")
         self.client = genai.Client(api_key=api_key)
         self.model = GEMINI_MODEL
-        self.planner_prompt = PLANNER_PROMPT_PATH.read_text(encoding="utf-8")
-        self.presenter_prompt = PRESENTER_PROMPT_PATH.read_text(encoding="utf-8")
+        self.instruction_prompt = CONVERSATION_INSTRUCTION_PATH.read_text(
+            encoding="utf-8"
+        )
         self.promotion_rules = PROMOTION_RULES_PATH.read_text(encoding="utf-8")
 
     def create_plan(
@@ -73,7 +73,10 @@ class GeminiProvider(AIProvider):
             ),
             config=types.GenerateContentConfig(
                 system_instruction=(
-                    self.planner_prompt
+                    self.instruction_prompt
+                    + "\n\n# CHẾ ĐỘ HIỆN TẠI: ĐIỀU PHỐI TOOL\n"
+                    + "Chỉ phân tích yêu cầu và trả ConversationPlan đúng schema. "
+                    + "Không viết câu trả lời cho khách."
                     + "\n\n"
                     + self.promotion_rules
                 ),
@@ -108,7 +111,11 @@ class GeminiProvider(AIProvider):
             ),
             config=types.GenerateContentConfig(
                 system_instruction=(
-                    self.presenter_prompt
+                    self.instruction_prompt
+                    + "\n\n# CHẾ ĐỘ HIỆN TẠI: TRẢ LỜI KHÁCH\n"
+                    + "Chỉ viết câu trả lời cuối dựa trên verified_result. "
+                    + "Không gọi tool, không tự tạo dữ liệu và không trả JSON. "
+                    + "CTA chỉ dùng verified_result.cta_text và chỉ xuất hiện một lần."
                     + "\n\n"
                     + self.promotion_rules
                 ),

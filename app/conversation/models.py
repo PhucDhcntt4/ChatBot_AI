@@ -71,6 +71,8 @@ class ConversationPlan(BaseModel):
     shipping_address: str | None = None
     payment_method: Literal["cod", "bank_transfer", "other"] | None = None
     requested_attributes: list[str] = Field(default_factory=list)
+    include_features: list[str] = Field(default_factory=list)
+    exclude_features: list[str] = Field(default_factory=list)
     use_knowledge: bool = False
     knowledge_query: str | None = None
     knowledge_categories: list[str] = Field(default_factory=list)

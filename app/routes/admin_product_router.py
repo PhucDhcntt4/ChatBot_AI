@@ -86,6 +86,47 @@ async def import_excel(file: UploadFile = File(...)):
         raise HTTPException(status_code=422, detail=str(error)) from error
 
 
+@router.post("/api/sync-all")
+def sync_all_products():
+    with database_connection() as connection:
+        rows = connection.execute(
+            """
+            SELECT product_code
+            FROM products
+            WHERE status = 'ACTIVE'
+              AND COALESCE(product_code, '') <> ''
+            ORDER BY product_code
+            """
+        ).fetchall()
+    codes = [str(row["product_code"]).strip() for row in rows]
+    if not codes:
+        raise HTTPException(
+            status_code=422,
+            detail="Chưa có sản phẩm ACTIVE để đồng bộ.",
+        )
+    try:
+        # Nút quản trị này cố ý không áp giới hạn 1.000 mã của file Excel.
+        # Worker vẫn xử lý tuần tự và ghi tiến độ vào Redis như job bình thường.
+        job = product_sync_manager.create(codes, max_skus=None)
+    except ValueError as error:
+        raise HTTPException(status_code=422, detail=str(error)) from error
+    return job.public()
+
+
+@router.get("/api/sync-all/preview")
+def sync_all_preview():
+    with database_connection() as connection:
+        active_count = connection.execute(
+            """
+            SELECT COUNT(*) AS count
+            FROM products
+            WHERE status = 'ACTIVE'
+              AND COALESCE(product_code, '') <> ''
+            """
+        ).fetchone()["count"]
+    return {"active_count": int(active_count or 0)}
+
+
 @router.get("/api/jobs/{job_id}")
 def job(job_id: str):
     result = product_sync_manager.get(job_id)
@@ -94,22 +135,47 @@ def job(job_id: str):
     return result
 
 
+@router.post("/api/jobs/{job_id}/cancel")
+def cancel_job(job_id: str):
+    result = product_sync_manager.cancel(job_id)
+    if not result:
+        raise HTTPException(status_code=404, detail="Không tìm thấy tác vụ.")
+    return result
+
+
 @router.get("/api/catalog")
 def catalog(
     search: str = Query("", max_length=100),
+    product_type: str = Query("", max_length=200),
     limit: int = Query(20, ge=1, le=100),
     offset: int = Query(0, ge=0),
 ):
     keyword = search.strip()
-    where = ""
-    search_params: list[object] = []
+    selected_type = product_type.strip()
+    conditions: list[str] = []
+    filter_params: list[object] = []
     if keyword:
-        where = "WHERE p.product_code ILIKE %s OR p.title ILIKE %s OR p.product_type ILIKE %s"
+        conditions.append(
+            "(p.product_code ILIKE %s OR p.title ILIKE %s "
+            "OR p.product_type ILIKE %s)"
+        )
         pattern = f"%{keyword}%"
-        search_params = [pattern, pattern, pattern]
+        filter_params.extend([pattern, pattern, pattern])
+    if selected_type:
+        conditions.append("p.product_type = %s")
+        filter_params.append(selected_type)
+    where = f"WHERE {' AND '.join(conditions)}" if conditions else ""
     with database_connection() as connection:
+        product_types = connection.execute(
+            """
+            SELECT DISTINCT product_type
+            FROM products
+            WHERE COALESCE(product_type, '') <> ''
+            ORDER BY product_type
+            """
+        ).fetchall()
         total = connection.execute(
-            f"SELECT COUNT(*) count FROM products p {where}", search_params
+            f"SELECT COUNT(*) count FROM products p {where}", filter_params
         ).fetchone()["count"]
         rows = connection.execute(
             f"""
@@ -131,7 +197,13 @@ def catalog(
             GROUP BY p.id ORDER BY p.updated_at DESC, p.product_code
             LIMIT %s OFFSET %s
             """,
-            [IMAGE_EMBEDDING_MODEL, IMAGE_EMBEDDING_PRETRAINED, *search_params, limit, offset],
+            [
+                IMAGE_EMBEDDING_MODEL,
+                IMAGE_EMBEDDING_PRETRAINED,
+                *filter_params,
+                limit,
+                offset,
+            ],
         ).fetchall()
     products = []
     for row in rows:
@@ -145,5 +217,90 @@ def catalog(
         products.append(item)
     return {
         "total": int(total), "limit": limit, "offset": offset,
-        "embedding_model": IMAGE_EMBEDDING_MODEL, "products": products,
+        "embedding_model": IMAGE_EMBEDDING_MODEL,
+        "product_types": [row["product_type"] for row in product_types],
+        "products": products,
+    }
+
+
+@router.get("/api/catalog/{product_code}")
+def catalog_detail(product_code: str):
+    code = product_code.strip().upper()
+    if not code:
+        raise HTTPException(status_code=422, detail="Mã sản phẩm không hợp lệ.")
+
+    with database_connection() as connection:
+        product = connection.execute(
+            """
+            SELECT product_code, title, handle, vendor, product_type,
+                   description, material, sole, height, status,
+                   online_store_url, source_updated_at, created_at, updated_at
+            FROM products
+            WHERE product_code = %s
+            """,
+            (code,),
+        ).fetchone()
+        if not product:
+            raise HTTPException(status_code=404, detail="Không tìm thấy sản phẩm.")
+
+        product_id = connection.execute(
+            "SELECT id FROM products WHERE product_code = %s",
+            (code,),
+        ).fetchone()["id"]
+        variants = connection.execute(
+            """
+            SELECT external_id, legacy_id, sku, barcode, variant_title,
+                   color, size, price, compare_at_price, inventory_quantity,
+                   available, source_updated_at, updated_at
+            FROM product_variants
+            WHERE product_id = %s
+            ORDER BY color NULLS LAST, size NULLS LAST, sku
+            """,
+            (product_id,),
+        ).fetchall()
+        images = connection.execute(
+            """
+            SELECT pi.color, pi.source_url, pi.local_path, pi.alt_text,
+                   pi.mime_type, pi.width, pi.height, pi.image_order,
+                   pi.is_featured, pi.is_active,
+                   EXISTS (
+                       SELECT 1
+                       FROM product_image_embeddings pie
+                       WHERE pie.product_image_id = pi.id
+                         AND pie.model_name = %s
+                         AND pie.pretrained_name = %s
+                   ) AS embedded
+            FROM product_images pi
+            WHERE pi.product_id = %s
+            ORDER BY pi.is_active DESC, pi.image_order NULLS LAST, pi.id
+            """,
+            (IMAGE_EMBEDDING_MODEL, IMAGE_EMBEDDING_PRETRAINED, product_id),
+        ).fetchall()
+        attributes = connection.execute(
+            """
+            SELECT attribute_key, attribute_value
+            FROM product_attributes
+            WHERE product_id = %s
+            ORDER BY attribute_key
+            """,
+            (product_id,),
+        ).fetchall()
+        aliases = connection.execute(
+            """
+            SELECT alias, alias_type
+            FROM product_aliases
+            WHERE product_id = %s
+            ORDER BY alias_type, alias
+            """,
+            (product_id,),
+        ).fetchall()
+
+    return {
+        "product": dict(product),
+        "variants": [dict(row) for row in variants],
+        "images": [dict(row) for row in images],
+        "attributes": [dict(row) for row in attributes],
+        "aliases": [dict(row) for row in aliases],
+        "embedding_model": IMAGE_EMBEDDING_MODEL,
+        "embedding_pretrained": IMAGE_EMBEDDING_PRETRAINED,
     }

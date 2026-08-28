@@ -6,7 +6,7 @@
     <title>Product Sync • Đông Hải</title>
     <link
       rel="stylesheet"
-      href="/static/css/product_admin.css?v=20260817-panel-fix"
+      href="/static/css/product_admin.css?v=20260828-type-filter1"
     />
     <link
       rel="stylesheet"
@@ -154,6 +154,17 @@
             </div>
           </div>
           <div class="catalog-tools">
+            <button
+              class="small sync-all-button"
+              id="syncAllButton"
+              type="button"
+              title="Đồng bộ lại toàn bộ sản phẩm ACTIVE"
+            >
+              Đồng bộ tất cả
+            </button>
+            <select id="catalogType" aria-label="Lọc theo thể loại sản phẩm">
+              <option value="">Tất cả thể loại</option>
+            </select>
             <input
               id="catalogSearch"
               placeholder="Tìm mã, tên hoặc loại sản phẩm"
@@ -204,6 +215,62 @@
         </div>
       </section>
     </main>
+    <div
+      class="product-detail-overlay"
+      id="productDetailModal"
+      role="dialog"
+      aria-modal="true"
+      aria-labelledby="productDetailTitle"
+      hidden
+    >
+      <section class="product-detail-dialog">
+        <header class="product-detail-head">
+          <div>
+            <span class="product-detail-code" id="productDetailCode">—</span>
+            <h2 id="productDetailTitle">Chi tiết sản phẩm</h2>
+          </div>
+          <button
+            class="product-detail-close"
+            id="productDetailClose"
+            type="button"
+            aria-label="Đóng chi tiết sản phẩm"
+          >
+            &times;
+          </button>
+        </header>
+        <div class="product-detail-body" id="productDetailBody">
+          <div class="product-detail-loading">Đang tải thông tin sản phẩm…</div>
+        </div>
+      </section>
+    </div>
+    <div
+      class="sync-confirm-overlay"
+      id="syncAllConfirmModal"
+      role="dialog"
+      aria-modal="true"
+      aria-labelledby="syncAllConfirmTitle"
+      hidden
+    >
+      <section class="sync-confirm-dialog">
+        <div class="sync-confirm-icon">↻</div>
+        <h2 id="syncAllConfirmTitle">Đồng bộ lại tất cả sản phẩm?</h2>
+        <p id="syncAllConfirmText">
+          Hệ thống đang kiểm tra số lượng sản phẩm cần đồng bộ.
+        </p>
+        <div class="sync-confirm-warning">
+          Tác vụ sẽ chạy qua worker và có thể mất nhiều thời gian. Chatbot vẫn
+          hoạt động bình thường trong quá trình này.
+        </div>
+        <div class="sync-confirm-actions">
+          <button id="syncAllCancel" class="sync-confirm-cancel" type="button">
+            Hủy
+          </button>
+          <button id="syncAllConfirm" type="button">
+            Xác nhận đồng bộ
+          </button>
+        </div>
+      </section>
+    </div>
     <div class="toast-stack" id="toastStack" aria-live="polite"></div>
 
     <button class="ck-launcher" id="chatLauncher" aria-expanded="false">
@@ -242,10 +309,7 @@
         <h3>Chat với đội ngũ hỗ trợ<br />của chúng tôi</h3>
       </div>
       <div class="ck-body" id="chatBody">
-        <div class="ck-msg bot">
-          👋 Xin chào anh/chị! Em là trợ lý AI của Đông Hải. Anh/chị cần em hỗ
-          trợ gì ạ?
-        </div>
+        <div class="ck-msg bot">👋 Xin chào anh/chị! Em là trợ lý AI của Đông Hải. Anh/chị cần em hỗ trợ gì ạ?</div>
       </div>
       <div class="ck-foot">
         <div class="ck-input-row">
@@ -321,7 +385,7 @@
     </div>
     <script src="/static/js/admin_base.js?v=20260824-1"></script>
     <script
-      src="/static/js/product_admin.js?v=20260821-persistent-chat"
+      src="/static/js/product_admin.js?v=20260828-type-filter1"
       defer
     ></script>
   </body>

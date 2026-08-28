@@ -15,6 +15,46 @@ class HumanModeRequest(BaseModel):
     ttl_seconds: int = Field(default=600, ge=60, le=604800)
 
 
+def _history_service(request: Request):
+    return getattr(
+        request.app.state,
+        "conversation_history_service",
+        None,
+    )
+
+
+def _combined_sessions(request: Request) -> list[dict]:
+    """Ghép cache đang chạy với lịch sử bền vững trong PostgreSQL."""
+    live_items = conversation_context_store.list_sessions()
+    history_service = _history_service(request)
+    stored_items = (
+        history_service.list_sessions(limit=10000)
+        if history_service is not None
+        else []
+    )
+    combined = {
+        (str(item["channel"]), str(item["session_id"])): {
+            **item,
+            "cache_active": False,
+            "ttl_seconds": None,
+        }
+        for item in stored_items
+    }
+    for live in live_items:
+        key = (str(live["channel"]), str(live["session_id"]))
+        stored = combined.get(key, {})
+        combined[key] = {
+            **stored,
+            **live,
+            "message_count": max(
+                int(stored.get("message_count") or 0),
+                int(live.get("message_count") or 0),
+            ),
+            "cache_active": True,
+        }
+    return list(combined.values())
+
+
 @router.get("", response_class=HTMLResponse)
 def page():
     return HTMLResponse(
@@ -31,7 +71,7 @@ def sessions(
     limit: int = Query(default=20, ge=1, le=100),
     offset: int = Query(default=0, ge=0),
 ):
-    items = conversation_context_store.list_sessions()
+    items = _combined_sessions(request)
     normalized_channel = (channel or "").strip().casefold()
     normalized_search = search.strip().casefold()
     if normalized_channel:
@@ -44,8 +84,8 @@ def sessions(
         ]
     items.sort(
         key=lambda item: (
-            item.get("ttl_seconds") is not None,
-            item.get("ttl_seconds") or -1,
+            str(item.get("last_message_at") or ""),
+            bool(item.get("cache_active")),
         ),
         reverse=True,
     )
@@ -70,23 +110,95 @@ def sessions(
 
 
 @router.get("/api/sessions/{channel}/{session_id}")
-def session_detail(channel: str, session_id: str):
-    item = conversation_context_store.inspect(session_id, channel)
-    if item is None:
+def session_detail(channel: str, session_id: str, request: Request):
+    live_item = conversation_context_store.inspect(session_id, channel)
+    history_service = _history_service(request)
+    stored_item = (
+        history_service.get_session(channel=channel, session_id=session_id)
+        if history_service is not None
+        else None
+    )
+    if live_item is None and stored_item is None:
         raise HTTPException(status_code=404, detail="Không tìm thấy hội thoại")
+    item = {
+        **(stored_item or {}),
+        **(live_item or {}),
+        "cache_active": live_item is not None,
+        "ttl_seconds": (
+            live_item.get("ttl_seconds") if live_item is not None else None
+        ),
+    }
+    stored_messages = (
+        history_service.list_messages(
+            channel=channel,
+            session_id=session_id,
+            limit=500,
+        )
+        if history_service is not None
+        else []
+    )
+    context = dict(item.get("context") or {})
+    if stored_messages:
+        context["history"] = [
+            {
+                "role": message.get("role"),
+                "text": message.get("content") or "",
+                "created_at": message.get("created_at"),
+            }
+            for message in stored_messages
+        ]
+        item["message_count"] = len(stored_messages)
+        item["last_message"] = stored_messages[-1].get("content") or ""
+    context.setdefault("history", [])
+    item["context"] = context
     return item
 
 
-@router.delete("/api/sessions/{channel}/{session_id}")
-def delete_session(channel: str, session_id: str, request: Request):
-    item = conversation_context_store.inspect(session_id, channel)
-    if item is None:
+@router.delete("/api/sessions/{channel}/{session_id}/cache")
+def clear_session_cache(channel: str, session_id: str, request: Request):
+    live_item = conversation_context_store.inspect(session_id, channel)
+    history_service = _history_service(request)
+    stored_item = (
+        history_service.get_session(channel=channel, session_id=session_id)
+        if history_service is not None
+        else None
+    )
+    if live_item is None and stored_item is None:
         raise HTTPException(status_code=404, detail="Không tìm thấy hội thoại")
-    conversation_context_store.reset(session_id, channel)
-    service = getattr(request.app.state, "human_mode_service", None)
-    if service is not None:
-        service.disable(channel, session_id)
-    return {"success": True, "channel": channel, "session_id": session_id}
+
+    snapshot_saved = False
+    if live_item is not None and history_service is not None:
+        snapshot_saved = history_service.update_session_snapshot(
+            channel=channel,
+            session_id=session_id,
+            snapshot=live_item,
+        )
+    if live_item is not None and stored_item is None and not snapshot_saved:
+        raise HTTPException(
+            status_code=503,
+            detail=(
+                "Hội thoại chưa được lưu an toàn vào PostgreSQL; "
+                "cache Redis chưa bị xóa"
+            ),
+        )
+    cache_deleted = conversation_context_store.reset(session_id, channel)
+
+    human_mode_service = getattr(
+        request.app.state,
+        "human_mode_service",
+        None,
+    )
+    if human_mode_service is not None:
+        human_mode_service.disable(channel, session_id)
+
+    return {
+        "success": True,
+        "channel": channel,
+        "session_id": session_id,
+        "cache_deleted": bool(cache_deleted),
+        "snapshot_saved": bool(snapshot_saved),
+        "history_preserved": stored_item is not None or snapshot_saved,
+    }
 
 
 def _human_mode_service(request: Request):
@@ -125,12 +237,40 @@ def global_human_mode_status(request: Request):
         "paused": len(paused),
         "all_paused": bool(session_keys) and len(paused) == len(session_keys),
         "remaining_seconds": min(remaining) if remaining else None,
+        "default_ttl_seconds": service.get_default_ttl(),
+    }
+
+
+@router.put("/api/human-mode/duration")
+def update_human_mode_duration(payload: HumanModeRequest, request: Request):
+    """Lưu thời gian mặc định và gia hạn các hội thoại đang tạm dừng."""
+    service = _human_mode_service(request)
+    ttl_seconds = service.set_default_ttl(payload.ttl_seconds)
+    renewed = 0
+    for channel, session_id in _all_session_keys():
+        details = service.details(channel, session_id)
+        if not details:
+            continue
+        service.enable(
+            channel,
+            session_id,
+            reason=str(details.get("reason") or "staff_takeover"),
+            activated_by=str(details.get("activated_by") or "admin"),
+            ttl_seconds=ttl_seconds,
+        )
+        renewed += 1
+    return {
+        "success": True,
+        "default_ttl_seconds": ttl_seconds,
+        "renewed": renewed,
+        "remaining_seconds": ttl_seconds if renewed else None,
     }
 
 
 @router.post("/api/human-mode")
 def enable_global_human_mode(payload: HumanModeRequest, request: Request):
     service = _human_mode_service(request)
+    service.set_default_ttl(payload.ttl_seconds)
     session_keys = _all_session_keys()
     for channel, session_id in session_keys:
         service.enable(

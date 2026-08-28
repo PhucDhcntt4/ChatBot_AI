@@ -153,7 +153,17 @@ class ConversationExecutor:
 
     def _product_search(self, message, plan, context) -> ExecutionResult:
         query = plan.search_query or plan.reference_product_code or message
-        found = self.products.search(query, limit=plan.requested_count)
+        search_parameters = inspect.signature(self.products.search).parameters
+        feature_arguments = {}
+        if "include_features" in search_parameters:
+            feature_arguments["include_features"] = plan.include_features
+        if "exclude_features" in search_parameters:
+            feature_arguments["exclude_features"] = plan.exclude_features
+        found = self.products.search(
+            query,
+            limit=plan.requested_count,
+            **feature_arguments,
+        )
         media = [item for product in found if (item := self._media(product))]
         # A bare/explicit product code may be classified by the AI as search
         # instead of product_information. Treat the exact single-code result as
@@ -257,8 +267,18 @@ class ConversationExecutor:
                 ]
             found = candidates[:plan.requested_count]
         else:
+            recommend_parameters = inspect.signature(
+                self.products.recommend_by_query
+            ).parameters
+            feature_arguments = {}
+            if "include_features" in recommend_parameters:
+                feature_arguments["include_features"] = plan.include_features
+            if "exclude_features" in recommend_parameters:
+                feature_arguments["exclude_features"] = plan.exclude_features
             found = self.products.recommend_by_query(
-                plan.search_query or message, plan.requested_count
+                plan.search_query or message,
+                plan.requested_count,
+                **feature_arguments,
             )
         media = [item for product in found if (item := self._media(product))]
         return ExecutionResult(

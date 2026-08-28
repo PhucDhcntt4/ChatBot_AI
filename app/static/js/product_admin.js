@@ -4,6 +4,9 @@ let timer = null,
   lastStatus = "",
   catalogPage = 1,
   catalogPages = 1;
+const catalogSyncJobs = new Map();
+const catalogSyncTimers = new Map();
+const catalogProducts = new Map();
 let lightboxUrls = [],
   lightboxIndex = 0,
   lightboxProductName = "",
@@ -13,6 +16,7 @@ const catalogPageSize = 20,
 function setBusy(v) {
   $("skuButton").disabled = v;
   $("excelButton").disabled = v;
+  $("syncAllButton").disabled = v;
   if (v) {
     clearTimeout(statusHideTimer);
     $("statusCard").hidden = false;
@@ -163,15 +167,291 @@ function dateText(value) {
     timeStyle: "short",
   }).format(new Date(value));
 }
+function moneyText(value) {
+  if (value === null || value === undefined || value === "") return "—";
+  const number = Number(value);
+  return Number.isFinite(number)
+    ? `${new Intl.NumberFormat("vi-VN").format(number)} đ`
+    : esc(value);
+}
+function detailValue(value) {
+  return value === null || value === undefined || value === ""
+    ? "—"
+    : esc(value);
+}
+function catalogAiControl(product) {
+  const code = product.product_code;
+  const job = catalogSyncJobs.get(code);
+  if (job && ["queued", "claimed", "running"].includes(job.status)) {
+    return `<select class="catalog-ai-select syncing" data-code="${esc(code)}" aria-label="Trạng thái đồng bộ ${esc(code)}">
+      <option value="" selected>Đang đồng bộ…</option>
+      <option value="cancel">Dừng đồng bộ</option>
+    </select>`;
+  }
+  if (job?.status === "cancel_requested") {
+    return `<select class="catalog-ai-select stopping" data-code="${esc(code)}" disabled aria-label="Đang dừng đồng bộ ${esc(code)}">
+      <option selected>Đang dừng…</option>
+    </select>`;
+  }
+  if (product.ai_ready) {
+    return `<select class="catalog-ai-select ready-select" data-code="${esc(code)}" aria-label="Đồng bộ lại ${esc(code)}">
+      <option value="" selected>✓ Đã đồng bộ</option>
+      <option value="sync">Đồng bộ lại</option>
+    </select>`;
+  }
+  return `<select class="catalog-ai-select pending-select" data-code="${esc(code)}" aria-label="Đồng bộ ${esc(code)}">
+    <option value="" selected>! Chưa đồng bộ</option>
+    <option value="sync">Đồng bộ</option>
+  </select>`;
+}
+function updateCatalogAiControl(code) {
+  const product = catalogProducts.get(code);
+  const row = [...document.querySelectorAll("#catalogRows tr[data-product-code]")]
+    .find((item) => item.dataset.productCode === code);
+  const cell = row?.querySelector(".catalog-ai-cell");
+  if (product && cell) cell.innerHTML = catalogAiControl(product);
+}
+function finishCatalogSync(job, code) {
+  const timerId = catalogSyncTimers.get(code);
+  if (timerId) clearTimeout(timerId);
+  catalogSyncTimers.delete(code);
+  catalogSyncJobs.delete(code);
+  setBusy(catalogSyncJobs.size > 0);
+  loadCatalog();
+  if (job.status === "cancelled") {
+    toast("Đã dừng đồng bộ", `Tác vụ của ${code} đã được dừng.`);
+  } else {
+    const failed = job.status === "failed" || job.failed;
+    toast(
+      failed ? "Đồng bộ có lỗi" : "Đã đồng bộ sản phẩm",
+      failed ? `${code} chưa được đồng bộ hoàn chỉnh.` : `${code} đã đồng bộ thành công.`,
+      !!failed,
+    );
+  }
+  if (catalogSyncJobs.size === 0) hideFinishedStatus();
+}
+async function pollCatalogSync(jobId, code) {
+  try {
+    const job = await asJson(
+      await fetch(`/admin/products/api/jobs/${encodeURIComponent(jobId)}`),
+    );
+    catalogSyncJobs.set(code, { id: jobId, status: job.status });
+    updateCatalogAiControl(code);
+    render(job);
+    if (["queued", "claimed", "running", "cancel_requested"].includes(job.status)) {
+      const timerId = setTimeout(() => pollCatalogSync(jobId, code), 1000);
+      catalogSyncTimers.set(code, timerId);
+      return;
+    }
+    finishCatalogSync(job, code);
+  } catch (error) {
+    catalogSyncJobs.delete(code);
+    updateCatalogAiControl(code);
+    setBusy(catalogSyncJobs.size > 0);
+    toast("Không theo dõi được đồng bộ", error.message, true);
+  }
+}
+async function startCatalogSync(code) {
+  try {
+    clearTimeout(statusHideTimer);
+    $("statusCard").hidden = false;
+    const job = await asJson(
+      await fetch("/admin/products/api/import-skus", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ skus: [code] }),
+      }),
+    );
+    catalogSyncJobs.set(code, { id: job.id, status: job.status });
+    setBusy(true);
+    updateCatalogAiControl(code);
+    render(job);
+    toast("Đã tiếp nhận", `Đang đồng bộ lại sản phẩm ${code}.`);
+    pollCatalogSync(job.id, code);
+  } catch (error) {
+    catalogSyncJobs.delete(code);
+    updateCatalogAiControl(code);
+    toast("Không thể đồng bộ", error.message, true);
+  }
+}
+async function cancelCatalogSync(code) {
+  const active = catalogSyncJobs.get(code);
+  if (!active?.id) return;
+  try {
+    const job = await asJson(
+      await fetch(
+        `/admin/products/api/jobs/${encodeURIComponent(active.id)}/cancel`,
+        { method: "POST" },
+      ),
+    );
+    catalogSyncJobs.set(code, { id: active.id, status: job.status });
+    updateCatalogAiControl(code);
+    render(job);
+    if (job.status === "cancelled") finishCatalogSync(job, code);
+    else toast("Đang dừng", `${code} sẽ dừng ở bước an toàn gần nhất.`);
+  } catch (error) {
+    toast("Không thể dừng đồng bộ", error.message, true);
+    updateCatalogAiControl(code);
+  }
+}
+let productDetailPreviousFocus = null;
+function closeProductDetail() {
+  $("productDetailModal").hidden = true;
+  document.body.classList.remove("product-detail-open");
+  if (productDetailPreviousFocus instanceof HTMLElement) {
+    productDetailPreviousFocus.focus();
+  }
+}
+let syncAllPreviousFocus = null;
+function closeSyncAllConfirm() {
+  $("syncAllConfirmModal").hidden = true;
+  document.body.classList.remove("sync-confirm-open");
+  if (syncAllPreviousFocus instanceof HTMLElement) {
+    syncAllPreviousFocus.focus();
+  }
+}
+async function openSyncAllConfirm() {
+  syncAllPreviousFocus = document.activeElement;
+  $("syncAllConfirmText").textContent =
+    "Hệ thống đang kiểm tra số lượng sản phẩm cần đồng bộ…";
+  $("syncAllConfirm").disabled = true;
+  $("syncAllConfirmModal").hidden = false;
+  document.body.classList.add("sync-confirm-open");
+  $("syncAllCancel").focus();
+  try {
+    const preview = await asJson(
+      await fetch("/admin/products/api/sync-all/preview"),
+    );
+    const count = Number(preview.active_count || 0);
+    $("syncAllConfirmText").textContent = count
+      ? `Hệ thống sẽ đồng bộ lại ${new Intl.NumberFormat("vi-VN").format(count)} sản phẩm đang ACTIVE.`
+      : "Hiện không có sản phẩm ACTIVE để đồng bộ.";
+    $("syncAllConfirm").disabled = count === 0;
+  } catch (error) {
+    $("syncAllConfirmText").textContent = error.message;
+    toast("Không kiểm tra được sản phẩm", error.message, true);
+  }
+}
+function renderProductDetail(data) {
+  const p = data.product || {};
+  const variants = data.variants || [];
+  const images = data.images || [];
+  const attributes = data.attributes || [];
+  const aliases = data.aliases || [];
+  const activeImages = images.filter((image) => image.is_active);
+  $("productDetailCode").textContent = p.product_code || "—";
+  $("productDetailTitle").textContent = p.title || "Chi tiết sản phẩm";
+  const facts = [
+    ["Loại sản phẩm", p.product_type],
+    ["Thương hiệu", p.vendor],
+    ["Chất liệu", p.material],
+    ["Đế", p.sole],
+    ["Chiều cao", p.height],
+    ["Trạng thái", p.status],
+    ["Cập nhật Shopify", dateText(p.source_updated_at)],
+    ["Cập nhật database", dateText(p.updated_at)],
+  ];
+  const imageHtml = activeImages.length
+    ? activeImages
+        .map(
+          (image) => `<article class="product-detail-image-card">
+            <div class="product-detail-image-frame">
+              ${image.source_url ? `<img src="${esc(image.source_url)}" alt="${esc(image.alt_text || p.title || p.product_code)}" loading="lazy" />` : '<span>Không có URL ảnh</span>'}
+            </div>
+            <div class="product-detail-image-meta">
+              <b>${detailValue(image.color || "Không xác định màu")}</b>
+              <span>${detailValue(image.width)} × ${detailValue(image.height)}</span>
+              <span class="ready${image.embedded ? "" : " no"}">${image.embedded ? "✓ Đã embedding" : "! Chưa embedding"}</span>
+            </div>
+          </article>`,
+        )
+        .join("")
+    : '<div class="product-detail-empty">Sản phẩm chưa có ảnh đang hoạt động.</div>';
+  const variantHtml = variants.length
+    ? variants
+        .map(
+          (variant) => `<tr>
+            <td><b>${detailValue(variant.sku)}</b><small>${detailValue(variant.variant_title)}</small></td>
+            <td>${detailValue(variant.color)}</td>
+            <td>${detailValue(variant.size)}</td>
+            <td>${moneyText(variant.price)}</td>
+            <td>${moneyText(variant.compare_at_price)}</td>
+            <td>${detailValue(variant.inventory_quantity)}</td>
+            <td><span class="ready${variant.available ? "" : " no"}">${variant.available ? "Còn hàng" : "Hết hàng"}</span></td>
+          </tr>`,
+        )
+        .join("")
+    : '<tr><td colspan="7" class="empty">Chưa có variant.</td></tr>';
+  const attributeHtml = attributes.length
+    ? attributes
+        .map(
+          (item) => `<div><dt>${detailValue(item.attribute_key)}</dt><dd>${detailValue(item.attribute_value)}</dd></div>`,
+        )
+        .join("")
+    : '<div class="product-detail-empty">Chưa có thuộc tính bổ sung.</div>';
+  const aliasHtml = aliases.length
+    ? aliases
+        .map(
+          (item) => `<span class="product-detail-alias">${detailValue(item.alias)} <small>${detailValue(item.alias_type)}</small></span>`,
+        )
+        .join("")
+    : '<span class="product-detail-empty">Chưa có từ khóa thay thế.</span>';
+  $("productDetailBody").innerHTML = `
+    <section class="product-detail-section">
+      <div class="product-detail-facts">${facts
+        .map(
+          ([label, value]) => `<div><span>${label}</span><b>${detailValue(value)}</b></div>`,
+        )
+        .join("")}</div>
+      ${p.online_store_url ? `<a class="product-detail-link" href="${esc(p.online_store_url)}" target="_blank" rel="noopener noreferrer">Xem sản phẩm trên website ↗</a>` : ""}
+    </section>
+    <section class="product-detail-section">
+      <h3>Mô tả</h3>
+      <p class="product-detail-description">${detailValue(p.description)}</p>
+    </section>
+    <section class="product-detail-section">
+      <div class="product-detail-section-head"><h3>Ảnh sản phẩm</h3><span>${activeImages.length}/${images.length} ảnh đang hoạt động · ${esc(data.embedding_model || "—")}</span></div>
+      <div class="product-detail-gallery">${imageHtml}</div>
+    </section>
+    <section class="product-detail-section">
+      <div class="product-detail-section-head"><h3>Toàn bộ variant</h3><span>${variants.length} variant</span></div>
+      <div class="table-wrap product-detail-variants"><table><thead><tr><th>SKU / Variant</th><th>Màu</th><th>Size</th><th>Giá</th><th>Giá so sánh</th><th>Tồn kho</th><th>Trạng thái</th></tr></thead><tbody>${variantHtml}</tbody></table></div>
+    </section>
+    <section class="product-detail-columns">
+      <div class="product-detail-section"><h3>Thuộc tính bổ sung</h3><dl class="product-detail-attributes">${attributeHtml}</dl></div>
+      <div class="product-detail-section"><h3>Từ khóa / Alias</h3><div class="product-detail-aliases">${aliasHtml}</div></div>
+    </section>`;
+}
+async function openProductDetail(code, trigger) {
+  productDetailPreviousFocus = trigger || document.activeElement;
+  $("productDetailCode").textContent = code;
+  $("productDetailTitle").textContent = "Đang tải sản phẩm…";
+  $("productDetailBody").innerHTML =
+    '<div class="product-detail-loading">Đang tải thông tin sản phẩm…</div>';
+  $("productDetailModal").hidden = false;
+  document.body.classList.add("product-detail-open");
+  $("productDetailClose").focus();
+  try {
+    const data = await asJson(
+      await fetch(`/admin/products/api/catalog/${encodeURIComponent(code)}`),
+    );
+    renderProductDetail(data);
+  } catch (error) {
+    $("productDetailTitle").textContent = "Không tải được sản phẩm";
+    $("productDetailBody").innerHTML =
+      `<div class="product-detail-empty bad">${esc(error.message)}</div>`;
+  }
+}
 async function loadCatalog() {
   const query = $("catalogSearch").value.trim(),
+    productType = $("catalogType").value,
     offset = (catalogPage - 1) * catalogPageSize;
   $("catalogRows").innerHTML =
     '<tr><td colspan="8" class="empty"><div class="empty-state"><div class="empty-icon">◷</div><span>Đang tải danh sách…</span></div></td></tr>';
   try {
     const data = await asJson(
       await fetch(
-        `/admin/products/api/catalog?search=${encodeURIComponent(query)}&limit=${catalogPageSize}&offset=${offset}`,
+        `/admin/products/api/catalog?search=${encodeURIComponent(query)}&product_type=${encodeURIComponent(productType)}&limit=${catalogPageSize}&offset=${offset}`,
       ),
     );
     catalogPages = Math.max(1, Math.ceil(data.total / catalogPageSize));
@@ -181,15 +461,27 @@ async function loadCatalog() {
     }
     $("catalogTotal").textContent = data.total;
     $("catalogModel").textContent = data.embedding_model;
+    $("catalogType").innerHTML =
+      '<option value="">Tất cả thể loại</option>' +
+      (data.product_types || [])
+        .map(
+          (type) =>
+            `<option value="${esc(type)}"${type === productType ? " selected" : ""}>${esc(type)}</option>`,
+        )
+        .join("");
     $("catalogPage").textContent = catalogPage;
     $("catalogPages").textContent = catalogPages;
     $("catalogPrev").disabled = catalogPage <= 1;
     $("catalogNext").disabled = catalogPage >= catalogPages;
+    catalogProducts.clear();
+    data.products.forEach((product) =>
+      catalogProducts.set(product.product_code, product),
+    );
     $("catalogRows").innerHTML = data.products.length
       ? data.products
           .map(
             (p) =>
-              `<tr><td><b>${esc(p.product_code)}</b></td><td class="product-title"><b title="${esc(p.title)}">${esc(p.title)}</b><small title="${esc(p.product_type || "")}">${esc(p.product_type || "—")}</small></td><td>${esc(p.colors || "—")}</td><td>${p.variant_count}</td><td>${p.local_image_count}/${p.image_count}</td><td>${p.embedding_count}</td><td><span class="ready${p.ai_ready ? "" : " no"}">${p.ai_ready ? "✓ Sẵn sàng" : "! Chưa đủ"}</span></td><td>${dateText(p.updated_at)}</td></tr>`,
+              `<tr class="catalog-product-row" data-product-code="${esc(p.product_code)}" tabindex="0" role="button" aria-label="Xem chi tiết ${esc(p.title)}"><td><b>${esc(p.product_code)}</b></td><td class="product-title"><b title="${esc(p.title)}">${esc(p.title)}</b><small title="${esc(p.product_type || "")}">${esc(p.product_type || "—")}</small></td><td>${esc(p.colors || "—")}</td><td>${p.variant_count}</td><td>${p.local_image_count}/${p.image_count}</td><td>${p.embedding_count}</td><td class="catalog-ai-cell">${catalogAiControl(p)}</td><td>${dateText(p.updated_at)}</td></tr>`,
           )
           .join("")
       : '<tr><td colspan="8" class="empty"><div class="empty-state"><div class="empty-icon">⌕</div><span>Không tìm thấy sản phẩm.</span></div></td></tr>';
@@ -199,6 +491,40 @@ async function loadCatalog() {
     toast("Không tải được catalog", e.message, true);
   }
 }
+$("catalogRows").addEventListener("click", (event) => {
+  if (event.target.closest(".catalog-ai-select")) return;
+  const row = event.target.closest("tr[data-product-code]");
+  if (row) openProductDetail(row.dataset.productCode, row);
+});
+$("catalogRows").addEventListener("change", (event) => {
+  const select = event.target.closest(".catalog-ai-select");
+  if (!select) return;
+  event.stopPropagation();
+  const code = select.dataset.code;
+  const action = select.value;
+  select.value = "";
+  if (action === "sync") startCatalogSync(code);
+  if (action === "cancel") cancelCatalogSync(code);
+});
+$("catalogRows").addEventListener("keydown", (event) => {
+  if (event.key !== "Enter" && event.key !== " ") return;
+  const row = event.target.closest("tr[data-product-code]");
+  if (!row) return;
+  event.preventDefault();
+  openProductDetail(row.dataset.productCode, row);
+});
+$("productDetailClose").onclick = closeProductDetail;
+$("productDetailModal").onclick = (event) => {
+  if (event.target === $("productDetailModal")) closeProductDetail();
+};
+document.addEventListener("keydown", (event) => {
+  if (event.key === "Escape" && !$("productDetailModal").hidden) {
+    closeProductDetail();
+  }
+  if (event.key === "Escape" && !$("syncAllConfirmModal").hidden) {
+    closeSyncAllConfirm();
+  }
+});
 $("excelFile").onchange = (e) =>
   ($("fileName").textContent =
     e.target.files[0]?.name || "Chưa có file được chọn");
@@ -234,12 +560,32 @@ $("excelButton").onclick = () => {
     }),
   );
 };
+$("syncAllButton").onclick = () => {
+  openSyncAllConfirm();
+};
+$("syncAllCancel").onclick = closeSyncAllConfirm;
+$("syncAllConfirmModal").onclick = (event) => {
+  if (event.target === $("syncAllConfirmModal")) closeSyncAllConfirm();
+};
+$("syncAllConfirm").onclick = () => {
+  closeSyncAllConfirm();
+  start(
+    fetch("/admin/products/api/sync-all", {
+      method: "POST",
+    }),
+  );
+};
 $("catalogSearchButton").onclick = () => {
   catalogPage = 1;
   loadCatalog();
 };
 $("catalogRefreshButton").onclick = () => {
   $("catalogSearch").value = "";
+  $("catalogType").value = "";
+  catalogPage = 1;
+  loadCatalog();
+};
+$("catalogType").onchange = () => {
   catalogPage = 1;
   loadCatalog();
 };

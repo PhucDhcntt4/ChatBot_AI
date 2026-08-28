@@ -2,6 +2,7 @@ import unittest
 
 from app.ai.base import AIProvider
 from app.conversation.context import ConversationContextStore
+from app.conversation.content_blocks import build_content_blocks
 from app.conversation.cta import CTAService, CTA_TEMPLATES
 from app.conversation.executor import ConversationExecutor
 from app.conversation.models import (
@@ -10,6 +11,7 @@ from app.conversation.models import (
     ConversationIntent,
     ConversationPlan,
     ExecutionResult,
+    ProductMedia,
     RequestedOrderItem,
     SalesStage,
 )
@@ -146,6 +148,254 @@ class ConversationTests(unittest.TestCase):
             "",
         )
 
+    def test_presenter_removes_media_urls_but_keeps_other_links(self):
+        image_url = "https://cdn.shopify.com/files/product_image.jpg?v=1"
+        result = ExecutionResult(
+            success=True,
+            status="product_found",
+            intent=ConversationIntent.PRODUCT_INFORMATION,
+            media=[
+                ProductMedia(
+                    product_code="GHLO8",
+                    image_urls=[image_url],
+                )
+            ],
+        )
+        text = (
+            "Dạ, đây là mẫu GHLO8 ạ.\n\n"
+            f"[{image_url}]({image_url})\n\n"
+            "Xem thêm tại https://shopdonghai.com/collections/giay-luoi"
+        )
+
+        cleaned = ConversationPresenter.remove_embedded_media_urls(text, result)
+
+        self.assertNotIn(image_url, cleaned.splitlines()[1] if len(cleaned.splitlines()) > 1 else "")
+        self.assertIn("https://shopdonghai.com/collections/giay-luoi", cleaned)
+
+    def test_presenter_adds_media_lead_when_ai_omits_it(self):
+        result = ExecutionResult(
+            success=True,
+            status="product_found",
+            intent=ConversationIntent.PRODUCT_INFORMATION,
+            media=[
+                ProductMedia(
+                    product_code="GHLO8",
+                    image_urls=["https://cdn.shopify.com/product.jpg"],
+                )
+            ],
+        )
+
+        reply = ConversationPresenter.ensure_media_lead(
+            "Dạ, mẫu GHLO8 hiện còn hàng ạ.",
+            result,
+        )
+
+        self.assertTrue(
+            reply.endswith("Em gửi anh/chị xem hình thực tế mẫu này nhé 👇")
+        )
+
+    def test_presenter_does_not_duplicate_existing_media_lead(self):
+        result = ExecutionResult(
+            success=True,
+            status="product_found",
+            intent=ConversationIntent.PRODUCT_INFORMATION,
+            media=[
+                ProductMedia(
+                    product_code="GHLO8",
+                    image_urls=["https://cdn.shopify.com/product.jpg"],
+                )
+            ],
+        )
+        original = "Em gửi anh/chị xem hình thực tế mẫu này nhé 👇"
+
+        self.assertEqual(
+            ConversationPresenter.ensure_media_lead(original, result),
+            original,
+        )
+
+    def test_presenter_removes_generated_cta_before_album(self):
+        result = ExecutionResult(
+            success=True,
+            status="product_found",
+            intent=ConversationIntent.PRODUCT_INFORMATION,
+            media=[
+                ProductMedia(
+                    product_code="GHLO8",
+                    image_urls=["https://cdn.shopify.com/product.jpg"],
+                )
+            ],
+            cta_type=CTAType.CHOOSE_PRODUCT,
+            cta_text="Anh/chị thích màu nào để em hỗ trợ tiếp ạ?",
+        )
+        reply = (
+            "Dạ, đây là thông tin mẫu GHLO8 ạ.\n\n"
+            "Anh/chị ưng mẫu em hỗ trợ tư vấn thêm cho mình ạ"
+        )
+
+        cleaned = ConversationPresenter.ensure_media_lead(reply, result)
+
+        self.assertNotIn("Anh/chị ưng mẫu", cleaned)
+        self.assertTrue(
+            cleaned.endswith("Em gửi anh/chị xem hình thực tế mẫu này nhé 👇")
+        )
+
+    def test_presenter_moves_if_cta_after_album_lead(self):
+        cta = (
+            "Nếu anh/chị ưng sản phẩm này, em hỗ trợ kiểm tra tình trạng "
+            "hàng và tư vấn thêm cho mình ạ❤️"
+        )
+        result = ExecutionResult(
+            success=True,
+            status="product_found",
+            intent=ConversationIntent.PRODUCT_INFORMATION,
+            products=[{
+                "product_code": "TM29",
+                "product_name": "Túi Xách Dáng Vỏ Sò",
+            }],
+            media=[
+                ProductMedia(
+                    product_code="TM29",
+                    image_urls=["https://cdn.shopify.com/TM29.jpg"],
+                )
+            ],
+            cta_type=CTAType.IMAGE_FEEDBACK,
+            cta_text=cta,
+        )
+        reply = (
+            "Dạ, em nhận diện được sản phẩm anh/chị vừa gửi rồi ạ:\n\n"
+            "Túi Xách Dáng Vỏ Sò\n\n"
+            "- Mã: TM29\n"
+            "- Giá: 3.450.000đ\n\n"
+            f"{cta}\n\n"
+            "Em gửi anh/chị xem hình thực tế mẫu này nhé 👇"
+        )
+
+        cleaned = ConversationPresenter.ensure_media_lead(reply, result)
+        presented = ConversationPresenter.with_cta(cleaned, result)
+        blocks = build_content_blocks(
+            presented,
+            result.products,
+            result.media,
+            result.cta_text,
+        )
+
+        self.assertNotIn(cta, cleaned)
+        self.assertEqual(
+            [block.type for block in blocks],
+            ["text", "media", "text"],
+        )
+        self.assertTrue(
+            (blocks[0].text or "").endswith(
+                "Em gửi anh/chị xem hình thực tế mẫu này nhé 👇"
+            )
+        )
+        self.assertEqual(blocks[-1].text, cta)
+
+    def test_presenter_removes_description_from_product_reply(self):
+        plan = ConversationPlan(
+            intent=ConversationIntent.PRODUCT_INFORMATION,
+        )
+        text = (
+            "Giày Tây Nam Zuciani Khóa Kim Loại\n\n"
+            "- Mã: GSD11\n"
+            "- Giá: 3.150.000 đ\n"
+            "- Mô tả: Nội dung marketing rất dài.\n"
+            "- Màu: Đen"
+        )
+
+        cleaned = ConversationPresenter.enforce_product_reply_format(text, plan)
+
+        self.assertNotIn("Mô tả", cleaned)
+        self.assertIn("- Màu: Đen", cleaned)
+
+    def test_presenter_hides_discounted_subtotal_without_promotion(self):
+        result = ExecutionResult(
+            success=True,
+            status="order_flow_updated",
+            intent=ConversationIntent.PRODUCT_INFORMATION,
+            facts={
+                "order_draft": {
+                    "subtotal": 1_550_000,
+                    "promotion_note": None,
+                    "discounted_subtotal": None,
+                    "shipping_fee": 30_000,
+                    "total": 1_580_000,
+                }
+            },
+        )
+        reply = (
+            "TỔNG KẾT THANH TOÁN\n\n"
+            "- Tiền sản phẩm: 1.550.000đ\n"
+            "- Tiền sản phẩm sau ưu đãi: 1.550.000đ\n"
+            "- Phí vận chuyển: 30.000đ\n"
+            "- Tổng thanh toán: 1.580.000đ"
+        )
+
+        cleaned = ConversationPresenter.enforce_order_summary_format(
+            reply,
+            result,
+        )
+
+        self.assertNotIn("sau ưu đãi", cleaned)
+        self.assertIn("Tổng thanh toán: 1.580.000đ", cleaned)
+
+    def test_presenter_keeps_discounted_subtotal_with_promotion(self):
+        result = ExecutionResult(
+            success=True,
+            status="order_flow_updated",
+            intent=ConversationIntent.PRODUCT_INFORMATION,
+            facts={
+                "order_draft": {
+                    "subtotal": 1_550_000,
+                    "promotion_note": (
+                        "Chương trình: Ưu đãi Sinh nhật | "
+                        "Giảm: 100.000 đ | Trạng thái: Đã ghi nhận ưu đãi"
+                    ),
+                    "promotion_discount_amount": 100_000,
+                    "discounted_subtotal": 1_450_000,
+                    "shipping_fee": 30_000,
+                    "total": 1_480_000,
+                }
+            },
+        )
+        reply = (
+            "- Khuyến mãi: Giảm trực tiếp 100.000 đ\n"
+            "- Tiền sản phẩm sau ưu đãi: 1.450.000đ"
+        )
+
+        cleaned = ConversationPresenter.enforce_order_summary_format(
+            reply,
+            result,
+        )
+
+        self.assertIn("Khuyến mãi", cleaned)
+        self.assertIn("- Khuyến mãi: 100.000đ", cleaned)
+        self.assertNotIn("Chương trình:", cleaned)
+        self.assertNotIn("Trạng thái:", cleaned)
+        self.assertIn("sau ưu đãi", cleaned)
+
+    def test_recommendation_reply_keeps_only_compact_product_fields(self):
+        plan = ConversationPlan(
+            intent=ConversationIntent.PRODUCT_RECOMMENDATION,
+        )
+        text = (
+            "- Mã: GSD11\n"
+            "- Giá: 3.150.000 đ\n"
+            "- Màu: Đen\n"
+            "- Size: 39, 40, 41, 42\n"
+            "- Chất liệu: Da cao cấp\n"
+            "- Đế: Cao su\n"
+            "- Chiều cao: 3cm\n"
+            "- Mô tả: Nội dung dài"
+        )
+
+        cleaned = ConversationPresenter.enforce_product_reply_format(text, plan)
+
+        self.assertIn("- Size: 39, 40, 41, 42", cleaned)
+        self.assertNotIn("Chất liệu", cleaned)
+        self.assertNotIn("Chiều cao", cleaned)
+        self.assertNotIn("Mô tả", cleaned)
+
     def test_product_search_extracts_vietnamese_height_constraints(self):
         self.assertEqual(
             ProductRepository._requested_heights(
@@ -158,6 +408,31 @@ class ConversationTests(unittest.TestCase):
         self.assertEqual(
             ProductRepository._height_values("Gót cao 7cm"),
             {7.0},
+        )
+
+    def test_generic_feature_constraints_support_exclusions(self):
+        self.assertFalse(
+            ProductRepository._matches_feature_constraints(
+                "Giày tây nam buộc dây da cao cấp",
+                include_features=[],
+                exclude_features=["dây"],
+            )
+        )
+        self.assertTrue(
+            ProductRepository._matches_feature_constraints(
+                "Giày lười nam da cao cấp",
+                include_features=[],
+                exclude_features=["dây"],
+            )
+        )
+
+    def test_negated_catalog_description_is_not_treated_as_positive_feature(self):
+        self.assertTrue(
+            ProductRepository._matches_feature_constraints(
+                "Thiết kế không dây, tiện lợi khi mang",
+                include_features=[],
+                exclude_features=["dây"],
+            )
         )
 
     def test_product_description_does_not_expose_stale_variant_facts(self):
@@ -829,6 +1104,50 @@ class ConversationTests(unittest.TestCase):
         policy.apply(plan, result, context)
 
         self.assertEqual(result.cta_type, CTAType.ASK_SIZE)
+
+    def test_unavailable_variant_does_not_ask_quantity(self):
+        product = {
+            **PRODUCT,
+            "available_sizes": ["35", "36", "37", "38", "39"],
+            "availability_by_color": {
+                "Đen": {
+                    "available": True,
+                    "available_sizes": ["35", "36", "37", "38"],
+                },
+                "Hồng": {
+                    "available": True,
+                    "available_sizes": ["39"],
+                },
+            },
+        }
+        context = ConversationContext(
+            session_id="unavailable-before-quantity",
+            channel="facebook",
+        )
+        plan = ConversationPlan(
+            intent=ConversationIntent.PRODUCT_INFORMATION,
+            reference_product_code="S32D9",
+            requested_color="Đen",
+            requested_size="39",
+            requested_quantity=None,
+            buying_intent=True,
+        )
+        result = ExecutionResult(
+            success=True,
+            status="product_found",
+            intent=plan.intent,
+            products=[{**product, "product_code": "S32D9"}],
+        )
+
+        OrderFlowService().apply(plan, result, context)
+        CTAService().apply(plan, result, context)
+
+        self.assertIn(
+            "size_unavailable_for_color",
+            result.facts["product_validation_errors"],
+        )
+        self.assertEqual(result.cta_type, CTAType.OUT_OF_STOCK_OPTIONS)
+        self.assertNotEqual(result.cta_type, CTAType.ASK_QUANTITY)
 
     def test_accessory_without_sizes_never_asks_for_size(self):
         context = ConversationContext(session_id="accessory-order", channel="web")

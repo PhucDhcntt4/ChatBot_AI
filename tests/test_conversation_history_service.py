@@ -31,10 +31,25 @@ class _Repository:
         self.calls.append(("list_messages", kwargs))
         return [{"id": 21, "role": "assistant"}]
 
-    def delete_session(self, **kwargs):
-        self.calls.append(("delete_session", kwargs))
-        return True
+    def list_sessions(self, **kwargs):
+        self.calls.append(("list_sessions", kwargs))
+        return [{
+            "channel": "web",
+            "session_id": "session-1",
+            "status": "active",
+            "message_count": 2,
+            "last_message": "Xin chào",
+            "latest_product_codes": ["G81V6"],
+            "metadata": {},
+        }]
 
+    def get_session(self, **kwargs):
+        self.calls.append(("get_session", kwargs))
+        return self.list_sessions(limit=1)[0]
+
+    def update_session_snapshot(self, **kwargs):
+        self.calls.append(("update_session_snapshot", kwargs))
+        return True
 
 class _FailingRepository(_Repository):
     def ensure_session(self, **kwargs):
@@ -131,7 +146,7 @@ class ConversationHistoryServiceTests(unittest.TestCase):
         self.assertEqual(failed["delivery_status"], "send_failed")
         self.assertEqual(failed["error_code"], "TELEGRAM_400")
 
-    def test_list_and_delete_use_session_id_as_key(self):
+    def test_list_uses_session_id_as_key(self):
         repository = _Repository()
         service = ConversationHistoryService(repository)
 
@@ -139,18 +154,34 @@ class ConversationHistoryServiceTests(unittest.TestCase):
             channel="web",
             session_id="session-1",
         )
-        deleted = service.delete_session(
-            channel="web",
-            session_id="session-1",
-        )
 
         self.assertEqual(messages[0]["id"], 21)
-        self.assertTrue(deleted)
         self.assertEqual(
             repository.calls[0][1]["session_key"],
             "session-1",
         )
 
+    def test_session_summary_is_available_after_redis_cache_is_cleared(self):
+        repository = _Repository()
+        service = ConversationHistoryService(repository)
+
+        sessions = service.list_sessions()
+        detail = service.get_session(channel="web", session_id="session-1")
+        saved = service.update_session_snapshot(
+            channel="web",
+            session_id="session-1",
+            snapshot={
+                "customer_name": "Minh",
+                "customer_phone": "0764776093",
+                "sales_stage": "collecting_contact",
+                "latest_product_code": "G81V6",
+            },
+        )
+
+        self.assertEqual(sessions[0]["sales_stage"], "archived")
+        self.assertFalse(sessions[0]["cache_active"])
+        self.assertEqual(detail["latest_product_code"], "G81V6")
+        self.assertTrue(saved)
 
 if __name__ == "__main__":
     unittest.main()

@@ -21,7 +21,7 @@ class ConversationContextStoreProtocol(Protocol):
     ) -> None:
         ...
 
-    def reset(self, session_id: str, channel: str) -> None:
+    def reset(self, session_id: str, channel: str) -> bool:
         ...
 
     def list_sessions(self) -> list[dict[str, Any]]:
@@ -66,9 +66,9 @@ class ConversationContextStore:
         context.history.append(HistoryItem(role=role, text=text))
         context.history = context.history[-HISTORY_LIMIT:]
 
-    def reset(self, session_id: str, channel: str) -> None:
+    def reset(self, session_id: str, channel: str) -> bool:
         with self._lock:
-            self._items.pop(self._key(channel, session_id), None)
+            return self._items.pop(self._key(channel, session_id), None) is not None
 
     def list_sessions(self) -> list[dict[str, Any]]:
         with self._lock:

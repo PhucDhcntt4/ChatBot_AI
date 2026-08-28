@@ -8,6 +8,36 @@ from app.database.connection import database_connection
 
 class ProductRepository:
     @classmethod
+    def _feature_present(cls, text: Any, feature: str) -> bool:
+        """Match one catalog feature while respecting explicit negation."""
+
+        haystack = " ".join(cls._normalize(text).split())
+        needle = " ".join(cls._normalize(feature).split())
+        if not haystack or not needle:
+            return False
+        # Remove explicitly negated occurrences before checking for a positive
+        # feature. This is generic: no product-specific feature vocabulary.
+        negated = re.compile(
+            rf"\b(?:khong|ko|k)(?:\s+co)?\s+{re.escape(needle)}\b"
+        )
+        positive_text = negated.sub(" ", haystack)
+        return bool(re.search(rf"\b{re.escape(needle)}\b", positive_text))
+
+    @classmethod
+    def _matches_feature_constraints(
+        cls,
+        text: Any,
+        include_features: list[str] | None,
+        exclude_features: list[str] | None,
+    ) -> bool:
+        included = [item for item in (include_features or []) if item.strip()]
+        excluded = [item for item in (exclude_features or []) if item.strip()]
+        return (
+            all(cls._feature_present(text, feature) for feature in included)
+            and not any(cls._feature_present(text, feature) for feature in excluded)
+        )
+
+    @classmethod
     def _requested_heights(cls, query: str) -> set[float]:
         """Extract customer-facing heel/platform heights from a search query.
 
@@ -278,7 +308,12 @@ class ProductRepository:
         }
 
     def search(
-        self, query: str, active_only: bool = True, limit: int = 5
+        self,
+        query: str,
+        active_only: bool = True,
+        limit: int = 5,
+        include_features: list[str] | None = None,
+        exclude_features: list[str] | None = None,
     ) -> list[dict[str, Any]]:
         normalized = self._normalize(query).strip()
         if not normalized:
@@ -357,6 +392,15 @@ class ProductRepository:
             searchable_tokens = word_tokens(
                 " ".join(str(row[key] or "") for key in row)
             )
+            searchable_text = " ".join(
+                str(row[key] or "") for key in row
+            )
+            if not self._matches_feature_constraints(
+                searchable_text,
+                include_features,
+                exclude_features,
+            ):
+                continue
             # Name and taxonomy are stronger than words occurring only in a
             # marketing description. Exact word matching also prevents
             # Vietnamese words such as "dép" from matching "đẹp".
@@ -406,19 +450,34 @@ class ProductRepository:
         products = [self.public_info(str(row["product_code"])) for row in rows]
         return [product for product in products if product]
 
-    def recommend_by_query(self, query: str, limit: int) -> list[dict[str, Any]]:
+    def recommend_by_query(
+        self,
+        query: str,
+        limit: int,
+        include_features: list[str] | None = None,
+        exclude_features: list[str] | None = None,
+    ) -> list[dict[str, Any]]:
         # Recommendation constraints (height, gender, material, wording) must
         # be ranked by ``search`` first.  The previous implementation jumped
         # directly to random products of one resolved type, discarding phrases
         # such as "5 phân" and producing unrelated albums.
-        matched = self.search(query=query, limit=limit)
+        matched = self.search(
+            query=query,
+            limit=limit,
+            include_features=include_features,
+            exclude_features=exclude_features,
+        )
         if matched:
             return matched
         # A constrained request must fail honestly when the catalog has no
         # match. Falling back to a random category item would attach images
         # that contradict the response (for example a 4 cm men's sandal for
         # a request containing 5 cm/7 cm).
-        if self._requested_heights(query):
+        if (
+            self._requested_heights(query)
+            or include_features
+            or exclude_features
+        ):
             return []
         resolved_type = self.resolve_product_type(query)
         if resolved_type:
@@ -427,4 +486,9 @@ class ProductRepository:
                 exclude_codes=[],
                 limit=limit,
             )
-        return self.search(query=query, limit=limit)
+        return self.search(
+            query=query,
+            limit=limit,
+            include_features=include_features,
+            exclude_features=exclude_features,
+        )

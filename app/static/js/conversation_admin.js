@@ -11,7 +11,12 @@ let globalAllPaused = false;
 let globalPausedCount = 0;
 let globalRemaining = null;
 let globalHumanModeBusy = false;
-const TRASH_ICON =
+let durationBusy = false;
+let savedHumanModeDuration = 600;
+let activeCache = false;
+let pendingCacheClear = null;
+let cacheClearBusy = false;
+const CLEAR_CACHE_ICON =
   '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round"><path d="M3 6h18"/><path d="M8 6V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"/><path d="M19 6l-1 14a2 2 0 0 1-2 2H8a2 2 0 0 1-2-2L5 6"/><path d="M10 11v6"/><path d="M14 11v6"/></svg>';
 const EMPTY_ICON =
   '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"><path d="M8 12h8"/><path d="M8 16h5"/><rect x="3" y="5" width="18" height="15" rx="3"/></svg>';
@@ -48,6 +53,17 @@ function countdownLabel(seconds) {
   }
   return `${String(minutes).padStart(2, "0")}:${String(secs).padStart(2, "0")}`;
 }
+function ensureDurationOption(seconds) {
+  const select = $("humanModeDuration");
+  const value = String(seconds);
+  if (![...select.options].some((option) => option.value === value)) {
+    const option = document.createElement("option");
+    option.value = value;
+    option.textContent = ttlLabel(seconds);
+    select.appendChild(option);
+  }
+  select.value = value;
+}
 function stageLabel(stage) {
   return (
     {
@@ -57,6 +73,7 @@ function stageLabel(stage) {
       awaiting_final_confirmation: "Chờ xác nhận",
       confirmed: "Đã xác nhận",
       cancelled: "Đã hủy",
+      archived: "Đã lưu",
     }[stage] || stage
   );
 }
@@ -86,13 +103,13 @@ function renderRows(items) {
       <td>${escapeHtml(item.customer_name || "—")}<small>${escapeHtml(item.customer_phone || "")}</small></td>
       <td><span class="pill stage-pill stage-${escapeHtml(item.sales_stage)}">${escapeHtml(stageLabel(item.sales_stage))}</span>${item.latest_product_code ? `<small>${escapeHtml(item.latest_product_code)}</small>` : ""}</td>
       <td class="num">${item.message_count}</td>
-      <td><span class="ttl-pill">${escapeHtml(ttlLabel(item.ttl_seconds))}</span></td>
+      <td><span class="ttl-pill">${item.cache_active ? escapeHtml(ttlLabel(item.ttl_seconds)) : "Đã lưu"}</span></td>
       <td>
         <div class="row-actions">
           <button class="mode-switch${botEnabled ? " on" : ""}" type="button" role="switch" aria-checked="${botEnabled}" title="${botEnabled ? "Bot đang bật — bấm để chuyển nhân viên" : "Bot đang tắt — bấm để bật lại bot"}">
             <span class="track"><span class="thumb"></span></span><span class="switch-label">${botEnabled ? "Bật" : `Tắt · ${countdownLabel(remaining)}`}</span>
           </button>
-          <button class="delete-session row-delete icon-only" type="button" title="Xóa lịch sử">${TRASH_ICON}</button>
+          <button class="delete-session row-clear-cache icon-only${item.cache_active ? "" : " is-empty"}" type="button" title="${item.cache_active ? "Xóa cache Redis, giữ lịch sử PostgreSQL" : "Cache Redis đã được xóa"}" aria-label="${item.cache_active ? "Xóa cache Redis" : "Cache Redis đã được xóa"}" ${item.cache_active ? "" : "disabled"}>${CLEAR_CACHE_ICON}</button>
         </div>
       </td>
     </tr>`;
@@ -114,6 +131,11 @@ async function loadSessions() {
   globalRemaining = globalAllPaused
     ? Number(globalStatus.remaining_seconds) || 0
     : null;
+  const configuredDuration = Number(globalStatus.default_ttl_seconds);
+  if (configuredDuration >= 60) {
+    savedHumanModeDuration = configuredDuration;
+    ensureDurationOption(configuredDuration);
+  }
   renderGlobalHumanMode();
   total = data.total;
   if (offset && offset >= total) {
@@ -139,7 +161,7 @@ function renderGlobalHumanMode() {
   button.classList.toggle("is-on", botEnabled);
   button.setAttribute("aria-checked", String(botEnabled));
   button.disabled = globalHumanModeBusy;
-  $("humanModeDuration").disabled = globalHumanModeBusy;
+  $("humanModeDuration").disabled = globalHumanModeBusy || durationBusy;
   const state = $("globalBotState");
   if (globalAllPaused) {
     state.textContent = `Đang tắt · Tự bật lại sau ${countdownLabel(globalRemaining)}`;
@@ -194,6 +216,7 @@ async function openSession(channel, sessionId) {
     responseJson(await fetch(`${baseUrl}/human-mode`)),
   ]);
   activeSession = { channel, sessionId };
+  activeCache = Boolean(item.cache_active);
   activeHumanMode = Boolean(humanMode.enabled);
   activeHumanModeRemaining = activeHumanMode
     ? Math.max(0, Number(humanMode.details?.remaining_seconds) || 0)
@@ -213,7 +236,11 @@ async function openSession(channel, sessionId) {
         .join("")
     : '<div class="empty-history">Hội thoại chưa có tin nhắn.</div>';
   $("conversationFooter").textContent =
-    `Thời gian lưu còn lại: ${ttlLabel(item.ttl_seconds)}`;
+    activeCache
+      ? `Cache Redis còn lại: ${ttlLabel(item.ttl_seconds)}`
+      : "Cache đã được giải phóng · lịch sử PostgreSQL vẫn được lưu";
+  const clearCacheButton = $("clearCurrentCache");
+  if (clearCacheButton) clearCacheButton.hidden = !activeCache;
   renderHumanModeButton();
   $("conversationModal").hidden = false;
   document.body.style.overflow = "hidden";
@@ -232,7 +259,8 @@ function renderHumanModeButton() {
     ? "Đang bật"
     : `Tự bật lại sau ${countdownLabel(activeHumanModeRemaining)}`;
   state.classList.toggle("is-off", !botEnabled);
-  $("humanModeDuration").disabled = humanModeBusy;
+  $("humanModeDuration").disabled =
+    humanModeBusy || globalHumanModeBusy || durationBusy;
 }
 function syncRowHumanMode(channel, sessionId, isHuman, remainingSeconds = null) {
   const row = document.querySelector(
@@ -345,62 +373,106 @@ async function toggleHumanMode() {
   }
 }
 async function updateHumanModeDuration() {
-  if (!activeSession || !activeHumanMode || humanModeBusy) return;
-  const { channel, sessionId } = activeSession;
-  const url = `/admin/conversations/api/sessions/${encodeURIComponent(channel)}/${encodeURIComponent(sessionId)}/human-mode`;
-  humanModeBusy = true;
-  renderHumanModeButton();
+  if (durationBusy) return;
+  const selectedDuration = Number($("humanModeDuration").value);
+  durationBusy = true;
+  renderGlobalHumanMode();
   try {
     const response = await responseJson(
-      await fetch(url, {
-        method: "POST",
+      await fetch("/admin/conversations/api/human-mode/duration", {
+        method: "PUT",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
-          ttl_seconds: Number($("humanModeDuration").value),
+          ttl_seconds: selectedDuration,
         }),
       }),
     );
-    activeHumanModeRemaining = response.details?.remaining_seconds ?? null;
-    syncRowHumanMode(
-      channel,
-      sessionId,
-      true,
-      activeHumanModeRemaining,
+    savedHumanModeDuration = Number(response.default_ttl_seconds);
+    if (globalAllPaused && response.remaining_seconds != null) {
+      globalRemaining = Number(response.remaining_seconds);
+    }
+    const renewed = Number(response.renewed) || 0;
+    notice(
+      `Đã đổi thời gian tạm dừng bot thành ${ttlLabel(savedHumanModeDuration)}` +
+        (renewed ? ` và gia hạn ${renewed} hội thoại đang tạm dừng.` : "."),
     );
-    notice("Đã cập nhật thời gian tạm dừng bot.");
+    await loadSessions();
+  } catch (error) {
+    ensureDurationOption(savedHumanModeDuration);
+    throw error;
   } finally {
-    humanModeBusy = false;
-    renderHumanModeButton();
+    durationBusy = false;
+    renderGlobalHumanMode();
   }
 }
-async function deleteSession(channel, sessionId) {
-  if (
-    !window.confirm(
-      `Xóa toàn bộ lịch sử của ${channel}:${sessionId}? Thao tác này không thể hoàn tác.`,
-    )
-  )
+function syncModalBodyState() {
+  const conversationModal = $("conversationModal");
+  const cacheModal = $("clearCacheConfirmModal");
+  const isOpen =
+    Boolean(conversationModal && !conversationModal.hidden) ||
+    Boolean(cacheModal && !cacheModal.hidden);
+  document.body.style.overflow = isOpen ? "hidden" : "";
+}
+function openClearCacheConfirm(channel, sessionId) {
+  const modal = $("clearCacheConfirmModal");
+  const text = $("clearCacheConfirmText");
+  const cancel = $("clearCacheCancel");
+  if (!modal || !text || !cancel) {
+    notice("Giao diện đang dùng bộ nhớ đệm cũ. Nhấn Ctrl + F5 rồi thử lại.", true);
     return;
-  await responseJson(
-    await fetch(
-      `/admin/conversations/api/sessions/${encodeURIComponent(channel)}/${encodeURIComponent(sessionId)}`,
-      { method: "DELETE" },
-    ),
-  );
-  if (
-    activeSession &&
-    activeSession.channel === channel &&
-    activeSession.sessionId === sessionId
-  )
-    closeModal();
-  notice("Đã xóa lịch sử hội thoại.");
-  await loadSessions();
+  }
+  pendingCacheClear = { channel, sessionId };
+  text.textContent = `Xóa cache đang chạy của ${channel}:${sessionId}?`;
+  modal.hidden = false;
+  syncModalBodyState();
+  cancel.focus();
+}
+function closeClearCacheConfirm() {
+  if (cacheClearBusy) return;
+  $("clearCacheConfirmModal").hidden = true;
+  pendingCacheClear = null;
+  syncModalBodyState();
+}
+async function confirmClearCache() {
+  if (!pendingCacheClear || cacheClearBusy) return;
+  const { channel, sessionId } = pendingCacheClear;
+  cacheClearBusy = true;
+  $("clearCacheCancel").disabled = true;
+  $("clearCacheConfirm").disabled = true;
+  $("clearCacheConfirm").textContent = "Đang xóa cache…";
+  try {
+    await responseJson(
+      await fetch(
+        `/admin/conversations/api/sessions/${encodeURIComponent(channel)}/${encodeURIComponent(sessionId)}/cache`,
+        { method: "DELETE" },
+      ),
+    );
+    $("clearCacheConfirmModal").hidden = true;
+    pendingCacheClear = null;
+    if (
+      activeSession &&
+      activeSession.channel === channel &&
+      activeSession.sessionId === sessionId
+    ) {
+      closeModal();
+    }
+    syncModalBodyState();
+    notice("Đã xóa cache Redis; lịch sử hội thoại vẫn được giữ lại.");
+    await loadSessions();
+  } finally {
+    cacheClearBusy = false;
+    $("clearCacheCancel").disabled = false;
+    $("clearCacheConfirm").disabled = false;
+    $("clearCacheConfirm").textContent = "Xác nhận xóa cache";
+  }
 }
 function closeModal() {
   $("conversationModal").hidden = true;
   activeSession = null;
   activeHumanMode = false;
   activeHumanModeRemaining = null;
-  document.body.style.overflow = "";
+  activeCache = false;
+  syncModalBodyState();
 }
 $("sessionRows").addEventListener("click", (event) => {
   const row = event.target.closest(".session-row");
@@ -412,8 +484,11 @@ $("sessionRows").addEventListener("click", (event) => {
     );
     return;
   }
-  const fn = event.target.closest(".row-delete") ? deleteSession : openSession;
-  fn(row.dataset.channel, row.dataset.session).catch((error) =>
+  if (event.target.closest(".row-clear-cache")) {
+    openClearCacheConfirm(row.dataset.channel, row.dataset.session);
+    return;
+  }
+  openSession(row.dataset.channel, row.dataset.session).catch((error) =>
     notice(error.message, true),
   );
 });
@@ -442,24 +517,31 @@ $("closeConversation").onclick = closeModal;
 $("conversationModal").onclick = (event) => {
   if (event.target === $("conversationModal")) closeModal();
 };
-$("deleteCurrentSession").onclick = () =>
-  activeSession &&
-  deleteSession(activeSession.channel, activeSession.sessionId).catch((error) =>
-    notice(error.message, true),
-  );
+$("clearCurrentCache")?.addEventListener("click", () => {
+  if (activeSession) {
+    openClearCacheConfirm(activeSession.channel, activeSession.sessionId);
+  }
+});
+$("clearCacheCancel")?.addEventListener("click", closeClearCacheConfirm);
+$("clearCacheConfirm")?.addEventListener("click", () =>
+  confirmClearCache().catch((error) => notice(error.message, true)),
+);
+$("clearCacheConfirmModal")?.addEventListener("click", (event) => {
+  if (event.target === $("clearCacheConfirmModal")) closeClearCacheConfirm();
+});
 $("toggleHumanMode").onclick = () =>
   toggleHumanMode().catch((error) => notice(error.message, true));
 $("toggleGlobalHumanMode").onclick = () =>
   toggleGlobalHumanMode().catch((error) => notice(error.message, true));
-$("humanModeDuration").onchange = () => {
-  if (globalAllPaused) {
-    toggleGlobalHumanMode({ renew: true }).catch((error) =>
-      notice(error.message, true),
-    );
-  }
-};
+$("humanModeDuration").onchange = () =>
+  updateHumanModeDuration().catch((error) => notice(error.message, true));
 document.addEventListener("keydown", (event) => {
-  if (event.key === "Escape" && !$("conversationModal").hidden) closeModal();
+  if (event.key !== "Escape") return;
+  if ($("clearCacheConfirmModal") && !$("clearCacheConfirmModal").hidden) {
+    closeClearCacheConfirm();
+  } else if (!$("conversationModal").hidden) {
+    closeModal();
+  }
 });
 window.setInterval(() => {
   document.querySelectorAll(".session-row[data-human='1']").forEach((row) => {

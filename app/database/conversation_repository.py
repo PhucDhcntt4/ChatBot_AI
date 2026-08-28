@@ -209,14 +209,128 @@ class ConversationRepository:
             ).fetchall()
         return [dict(row) for row in rows]
 
-    def delete_session(self, *, channel: str, session_key: str) -> bool:
+    def list_sessions(self, *, limit: int = 5000) -> list[dict[str, Any]]:
+        """Danh sách hội thoại bền vững để trang quản trị theo dõi."""
+        safe_limit = min(max(int(limit), 1), 10000)
+        with database_connection() as connection:
+            rows = connection.execute(
+                """
+                SELECT
+                    cs.channel,
+                    cs.session_key AS session_id,
+                    cs.external_user_id,
+                    cs.customer_name,
+                    cs.customer_phone,
+                    cs.status,
+                    cs.started_at,
+                    cs.last_message_at,
+                    cs.metadata,
+                    COALESCE(message_stats.message_count, 0) AS message_count,
+                    COALESCE(last_message.content, '') AS last_message,
+                    latest_product.product_codes AS latest_product_codes
+                FROM conversation_sessions cs
+                LEFT JOIN LATERAL (
+                    SELECT COUNT(*)::integer AS message_count
+                    FROM conversation_messages cm
+                    WHERE cm.conversation_id = cs.id
+                ) message_stats ON TRUE
+                LEFT JOIN LATERAL (
+                    SELECT cm.content
+                    FROM conversation_messages cm
+                    WHERE cm.conversation_id = cs.id
+                    ORDER BY cm.created_at DESC, cm.id DESC
+                    LIMIT 1
+                ) last_message ON TRUE
+                LEFT JOIN LATERAL (
+                    SELECT cm.product_codes
+                    FROM conversation_messages cm
+                    WHERE cm.conversation_id = cs.id
+                      AND jsonb_array_length(cm.product_codes) > 0
+                    ORDER BY cm.created_at DESC, cm.id DESC
+                    LIMIT 1
+                ) latest_product ON TRUE
+                ORDER BY cs.last_message_at DESC, cs.id DESC
+                LIMIT %s
+                """,
+                (safe_limit,),
+            ).fetchall()
+        return [dict(row) for row in rows]
+
+    def get_session(
+        self,
+        *,
+        channel: str,
+        session_key: str,
+    ) -> dict[str, Any] | None:
+        with database_connection() as connection:
+            row = connection.execute(
+                """
+                SELECT
+                    cs.channel,
+                    cs.session_key AS session_id,
+                    cs.external_user_id,
+                    cs.customer_name,
+                    cs.customer_phone,
+                    cs.status,
+                    cs.started_at,
+                    cs.last_message_at,
+                    cs.metadata,
+                    COALESCE(message_stats.message_count, 0) AS message_count,
+                    COALESCE(last_message.content, '') AS last_message,
+                    latest_product.product_codes AS latest_product_codes
+                FROM conversation_sessions cs
+                LEFT JOIN LATERAL (
+                    SELECT COUNT(*)::integer AS message_count
+                    FROM conversation_messages cm
+                    WHERE cm.conversation_id = cs.id
+                ) message_stats ON TRUE
+                LEFT JOIN LATERAL (
+                    SELECT cm.content
+                    FROM conversation_messages cm
+                    WHERE cm.conversation_id = cs.id
+                    ORDER BY cm.created_at DESC, cm.id DESC
+                    LIMIT 1
+                ) last_message ON TRUE
+                LEFT JOIN LATERAL (
+                    SELECT cm.product_codes
+                    FROM conversation_messages cm
+                    WHERE cm.conversation_id = cs.id
+                      AND jsonb_array_length(cm.product_codes) > 0
+                    ORDER BY cm.created_at DESC, cm.id DESC
+                    LIMIT 1
+                ) latest_product ON TRUE
+                WHERE cs.channel = %s AND cs.session_key = %s
+                """,
+                (
+                    str(channel).strip().lower(),
+                    str(session_key).strip(),
+                ),
+            ).fetchone()
+        return dict(row) if row else None
+
+    def update_session_snapshot(
+        self,
+        *,
+        channel: str,
+        session_key: str,
+        customer_name: str | None = None,
+        customer_phone: str | None = None,
+        metadata: dict[str, Any] | None = None,
+    ) -> bool:
+        """Giữ thông tin tóm tắt trước khi cache Redis được giải phóng."""
         with database_connection() as connection:
             cursor = connection.execute(
                 """
-                DELETE FROM conversation_sessions
+                UPDATE conversation_sessions
+                SET customer_name = COALESCE(%s, customer_name),
+                    customer_phone = COALESCE(%s, customer_phone),
+                    metadata = metadata || %s::jsonb
                 WHERE channel = %s AND session_key = %s
                 """,
                 (
+                    customer_name,
+                    customer_phone,
+                    self._json(metadata, {}),
                     str(channel).strip().lower(),
                     str(session_key).strip(),
                 ),

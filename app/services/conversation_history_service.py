@@ -222,15 +222,86 @@ class ConversationHistoryService:
             )
             return []
 
-    def delete_session(self, *, channel: str, session_id: str) -> bool:
+    @staticmethod
+    def _session_summary(row: dict[str, Any]) -> dict[str, Any]:
+        metadata = dict(row.get("metadata") or {})
+        product_codes = list(row.get("latest_product_codes") or [])
+        status = str(row.get("status") or "active")
+        return {
+            **row,
+            "session_id": str(row.get("session_id") or ""),
+            "sales_stage": metadata.get("sales_stage") or (
+                status if status != "active" else "archived"
+            ),
+            "latest_product_code": (
+                metadata.get("latest_product_code")
+                or (str(product_codes[0]) if product_codes else None)
+            ),
+            "customer_name": (
+                row.get("customer_name") or metadata.get("customer_name")
+            ),
+            "customer_phone": (
+                row.get("customer_phone") or metadata.get("customer_phone")
+            ),
+            "ttl_seconds": None,
+            "cache_active": False,
+        }
+
+    def list_sessions(self, *, limit: int = 5000) -> list[dict[str, Any]]:
         try:
-            return self.repository.delete_session(
+            return [
+                self._session_summary(row)
+                for row in self.repository.list_sessions(limit=limit)
+            ]
+        except Exception:
+            logger.exception("CONVERSATION SESSION LIST FAILED")
+            return []
+
+    def get_session(
+        self,
+        *,
+        channel: str,
+        session_id: str,
+    ) -> dict[str, Any] | None:
+        try:
+            row = self.repository.get_session(
                 channel=channel,
                 session_key=str(session_id),
             )
+            return self._session_summary(row) if row else None
         except Exception:
             logger.exception(
-                "CONVERSATION HISTORY DELETE FAILED channel=%s session=%s",
+                "CONVERSATION SESSION READ FAILED channel=%s session=%s",
+                channel,
+                session_id,
+            )
+            return None
+
+    def update_session_snapshot(
+        self,
+        *,
+        channel: str,
+        session_id: str,
+        snapshot: dict[str, Any],
+    ) -> bool:
+        try:
+            return self.repository.update_session_snapshot(
+                channel=channel,
+                session_key=str(session_id),
+                customer_name=snapshot.get("customer_name"),
+                customer_phone=snapshot.get("customer_phone"),
+                metadata={
+                    "sales_stage": snapshot.get("sales_stage"),
+                    "latest_product_code": snapshot.get(
+                        "latest_product_code"
+                    ),
+                    "customer_name": snapshot.get("customer_name"),
+                    "customer_phone": snapshot.get("customer_phone"),
+                },
+            )
+        except Exception:
+            logger.exception(
+                "CONVERSATION SNAPSHOT UPDATE FAILED channel=%s session=%s",
                 channel,
                 session_id,
             )

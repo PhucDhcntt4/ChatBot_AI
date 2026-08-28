@@ -497,19 +497,25 @@ class OrderFlowService:
         shipping_fee = self.shipping_policy.standard_fee(
             context.draft_payment_method
         )
+        promotion_applied = bool(context.draft_promotion_note) and (
+            context.draft_promotion_eligible is True
+        )
         discount_amount = (
             (context.draft_promotion_discount_amount or 0)
-            if context.draft_promotion_eligible is True
+            if promotion_applied
             else 0
         )
-        discounted_subtotal = (
+        payable_subtotal = (
             max(subtotal - discount_amount, 0)
             if subtotal is not None
             else None
         )
+        discounted_subtotal = (
+            payable_subtotal if promotion_applied else None
+        )
         total = (
-            discounted_subtotal + shipping_fee
-            if discounted_subtotal is not None and shipping_fee is not None
+            payable_subtotal + shipping_fee
+            if payable_subtotal is not None and shipping_fee is not None
             else None
         )
         return {
@@ -738,9 +744,12 @@ class OrderFlowService:
         )
 
         missing_product = self.missing_product_fields(context, product)
+        # Validate every supplied variant before asking for later fields such
+        # as quantity. Otherwise an unavailable color-size combined with a
+        # missing quantity would incorrectly produce the ask_quantity CTA.
         product_errors = (
             requested_item_errors
-            or (self._product_errors(context, product) if not missing_product else [])
+            or self._product_errors(context, product)
         )
         if not missing_product and not product_errors:
             if previous_item_identity:

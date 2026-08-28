@@ -100,6 +100,19 @@ class HumanModeTests(unittest.TestCase):
         with self.assertRaises(ValueError):
             service.enable("web", "customer-3", ttl_seconds=30)
 
+    def test_default_ttl_is_saved_and_loaded_from_redis(self):
+        service = HumanModeService()
+        with patch(
+            "app.services.human_mode_service.redis_client"
+        ) as redis:
+            stored = service.set_default_ttl(1500)
+            redis.get.return_value = "1500"
+            loaded = service.get_default_ttl()
+
+        redis.set.assert_called_once_with(service.DEFAULT_TTL_KEY, 1500)
+        self.assertEqual(stored, 1500)
+        self.assertEqual(loaded, 1500)
+
     def test_human_mode_keeps_user_history_and_skips_ai(self):
         conversation = FakeConversation()
         history = FakeHistory()
