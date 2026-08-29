@@ -732,13 +732,18 @@ def save_product(product_data: dict) -> None:
 
 def import_products_to_database(
     product_items: list[dict[str, Any]],
+    *,
+    local_images: dict[str, dict[str, str]] | None = None,
 ) -> int:
     """Chuẩn hóa và upsert các sản phẩm vừa lấy vào PostgreSQL."""
 
     if not product_items:
         raise ValueError("Không có sản phẩm để import vào database.")
 
-    catalog = normalize_catalog(product_items)
+    catalog = normalize_catalog(
+        product_items,
+        local_images=local_images,
+    )
     if not catalog["products"]:
         raise ValueError("Dữ liệu sản phẩm không thể chuẩn hóa.")
 
@@ -806,11 +811,11 @@ def main() -> None:
 
             image_result = sync_product_images(
                 matching_products,
-                remove_stale=False,
             )
 
             sync_run_id = import_products_to_database(
-                matching_products
+                matching_products,
+                local_images=image_result["local_images"],
             )
 
             print("\n========== TẠO IMAGE EMBEDDING ==========")
@@ -845,4 +850,3 @@ def main() -> None:
 
 if __name__ == "__main__":
     main()
-

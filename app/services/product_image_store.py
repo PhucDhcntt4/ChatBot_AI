@@ -1,54 +1,58 @@
-import json
 from pathlib import Path
-from typing import Any
 
-from app.config import (
-    PRODUCT_IMAGE_DIR,
-    PRODUCT_IMAGE_MANIFEST_PATH,
-)
+from app.config import PRODUCT_IMAGE_DIR
+from app.database.connection import database_connection
 
 
 class ProductImageStore:
     def __init__(
         self,
         image_dir: str | Path = PRODUCT_IMAGE_DIR,
-        manifest_path: str | Path = PRODUCT_IMAGE_MANIFEST_PATH,
     ) -> None:
         self.image_dir = Path(image_dir)
-        self.manifest_path = Path(manifest_path)
-        self._manifest = self._load_manifest()
-
-    def _load_manifest(
-        self,
-    ) -> dict[str, dict[str, Any]]:
-        if not self.manifest_path.exists():
-            return {}
-
-        try:
-            data = json.loads(
-                self.manifest_path.read_text(encoding="utf-8")
-            )
-
-        except (OSError, json.JSONDecodeError):
-            return {}
-
-        if not isinstance(data, dict):
-            return {}
-
-        return {
-            str(url): item
-            for url, item in data.items()
-            if isinstance(item, dict)
-        }
+        self._metadata_cache: dict[str, dict[str, str]] = {}
 
     def reload(self) -> None:
-        self._manifest = self._load_manifest()
+        self._metadata_cache.clear()
+
+    def _metadata(self, source_url: str) -> dict[str, str] | None:
+        cached = self._metadata_cache.get(source_url)
+        if cached:
+            return cached
+
+        try:
+            with database_connection() as connection:
+                row = connection.execute(
+                    """
+                    SELECT local_path, mime_type
+                    FROM product_images
+                    WHERE source_url = %s
+                      AND is_active = TRUE
+                      AND local_path IS NOT NULL
+                      AND local_path <> ''
+                    ORDER BY updated_at DESC, id DESC
+                    LIMIT 1
+                    """,
+                    (source_url,),
+                ).fetchone()
+        except Exception:
+            return None
+
+        if not row:
+            return None
+
+        metadata = {
+            "local_path": str(row["local_path"]),
+            "mime_type": str(row["mime_type"] or "image/jpeg"),
+        }
+        self._metadata_cache[source_url] = metadata
+        return metadata
 
     def get(
         self,
         source_url: str,
     ) -> tuple[bytes, str] | None:
-        item = self._manifest.get(source_url)
+        item = self._metadata(source_url)
 
         if not item:
             return None

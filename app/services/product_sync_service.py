@@ -361,7 +361,7 @@ class ProductSyncManager:
                     self._save(job)
 
                     self._phase(job, "images", f"Đang tải ảnh {sku}")
-                    image_result = sync_product_images(products, remove_stale=False)
+                    image_result = sync_product_images(products)
                     if self._finish_cancelled(job_id):
                         return
                     self.heartbeat(job)
@@ -369,7 +369,10 @@ class ProductSyncManager:
                     self._save(job)
 
                     self._phase(job, "database", f"Đang import database {sku}")
-                    sync_run_id = import_products_to_database(products)
+                    sync_run_id = import_products_to_database(
+                        products,
+                        local_images=image_result["local_images"],
+                    )
                     if self._finish_cancelled(job_id):
                         return
                     self.heartbeat(job)

@@ -10,7 +10,6 @@ from typing import Any
 from psycopg.types.json import Jsonb # type: ignore
 
 from app.config import (
-    PRODUCT_IMAGE_MANIFEST_PATH,
     PROJECT_ROOT,
     PRODUCTS_PATH,
 )
@@ -109,7 +108,11 @@ def description_colors(description: str) -> list[str]:
     ]
 
 
-def normalize_catalog(data: list[dict[str, Any]]) -> dict[str, Any]:
+def normalize_catalog(
+    data: list[dict[str, Any]],
+    local_images: dict[str, dict[str, str]] | None = None,
+) -> dict[str, Any]:
+    local_images = local_images or {}
     products: dict[str, dict[str, Any]] = {}
     source_payloads: list[dict[str, Any]] = []
 
@@ -196,16 +199,21 @@ def normalize_catalog(data: list[dict[str, Any]]) -> dict[str, Any]:
         for color in assigned_colors:
             for position, (image, is_featured) in enumerate(image_items):
                 key = (str(image.get("url")), normalize_text(color))
+                image_url = str(image.get("url") or "").strip()
+                local_metadata = local_images.get(image_url) or {}
                 canonical["images"][key] = {
                     "external_id": image.get("id"),
                     "color": color,
                     "color_normalized": normalize_text(color),
-                    "source_url": image.get("url"),
+                    "source_url": image_url,
+                    "local_path": local_metadata.get("local_path"),
                     "alt_text": image.get("altText"),
+                    "mime_type": local_metadata.get("mime_type"),
                     "width": image.get("width"),
                     "height": image.get("height"),
                     "image_order": position,
                     "is_featured": is_featured,
+                    "checksum": local_metadata.get("checksum"),
                 }
 
         encoded = json.dumps(
@@ -226,42 +234,6 @@ def normalize_catalog(data: list[dict[str, Any]]) -> dict[str, Any]:
 
 def initialize_schema(connection: Any) -> None:
     connection.execute(SCHEMA_PATH.read_text(encoding="utf-8"))
-
-
-def sync_local_image_paths(connection: Any) -> int:
-    if not PRODUCT_IMAGE_MANIFEST_PATH.exists():
-        return 0
-    manifest = json.loads(
-        PRODUCT_IMAGE_MANIFEST_PATH.read_text(encoding="utf-8")
-    )
-    if not isinstance(manifest, dict):
-        raise ValueError("manifest.json phải là một object")
-
-    updated = 0
-    for source_url, metadata in manifest.items():
-        if not isinstance(metadata, dict):
-            continue
-        local_path = str(metadata.get("local_path") or "").strip()
-        if not local_path:
-            continue
-        result = connection.execute(
-            """
-            UPDATE product_images
-            SET local_path = %s,
-                mime_type = %s,
-                checksum = COALESCE(%s, checksum),
-                updated_at = NOW()
-            WHERE source_url = %s
-            """,
-            (
-                local_path,
-                metadata.get("mime_type") or "image/jpeg",
-                metadata.get("checksum"),
-                source_url,
-            ),
-        )
-        updated += result.rowcount
-    return updated
 
 
 def import_catalog(connection: Any, catalog: dict[str, Any]) -> int:
@@ -382,20 +354,46 @@ def import_catalog(connection: Any, catalog: dict[str, Any]) -> int:
                     """
                     INSERT INTO product_images(
                         product_id, external_id, color, color_normalized,
-                        source_url, alt_text, width, height, image_order,
-                        is_featured
-                    ) VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
+                        source_url, local_path, alt_text, mime_type,
+                        width, height, image_order, is_featured, checksum
+                    ) VALUES (
+                        %s, %s, %s, %s, %s, %s, %s,
+                        %s, %s, %s, %s, %s, %s
+                    )
                     ON CONFLICT (product_id, source_url, color_normalized)
                     DO UPDATE SET
+                        local_path = COALESCE(
+                            EXCLUDED.local_path, product_images.local_path
+                        ),
                         alt_text = EXCLUDED.alt_text,
+                        mime_type = COALESCE(
+                            EXCLUDED.mime_type, product_images.mime_type
+                        ),
                         width = EXCLUDED.width,
                         height = EXCLUDED.height,
                         image_order = EXCLUDED.image_order,
                         is_featured = EXCLUDED.is_featured,
+                        checksum = COALESCE(
+                            EXCLUDED.checksum, product_images.checksum
+                        ),
                         is_active = TRUE,
                         updated_at = NOW()
                     """,
-                    (product_id, *image.values()),
+                    (
+                        product_id,
+                        image["external_id"],
+                        image["color"],
+                        image["color_normalized"],
+                        image["source_url"],
+                        image["local_path"],
+                        image["alt_text"],
+                        image["mime_type"],
+                        image["width"],
+                        image["height"],
+                        image["image_order"],
+                        image["is_featured"],
+                        image["checksum"],
+                    ),
                 )
 
             for alias in product["aliases"]:
@@ -432,7 +430,6 @@ def import_catalog(connection: Any, catalog: dict[str, Any]) -> int:
             """,
             (len(catalog["products"]), run_id),
         )
-        sync_local_image_paths(connection)
         return run_id
     except Exception as exc:
         connection.execute(

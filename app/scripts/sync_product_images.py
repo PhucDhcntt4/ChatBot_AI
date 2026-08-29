@@ -1,4 +1,5 @@
 import json
+import hashlib
 import mimetypes
 import re
 import sys
@@ -7,12 +8,13 @@ from typing import Any
 from urllib.parse import urlparse
 
 import requests
+from psycopg.errors import UndefinedTable
 
 from app.config import (
     PRODUCTS_PATH,
     PRODUCT_IMAGE_DIR,
-    PRODUCT_IMAGE_MANIFEST_PATH,
 )
+from app.database.connection import database_connection
 
 
 ALLOWED_MIME_TYPES = {
@@ -110,20 +112,58 @@ def load_products() -> list[dict[str, Any]]:
     ]
 
 
-def load_manifest() -> dict[str, dict[str, str]]:
-    if not PRODUCT_IMAGE_MANIFEST_PATH.exists():
+def load_database_image_metadata(
+    source_urls: set[str],
+) -> dict[str, dict[str, str]]:
+    """Lấy ánh xạ URL → ảnh local từ PostgreSQL."""
+
+    if not source_urls:
         return {}
 
     try:
-        data = json.loads(
-            PRODUCT_IMAGE_MANIFEST_PATH.read_text(
-                encoding="utf-8"
-            )
-        )
-    except (OSError, json.JSONDecodeError):
-        return {}
+        with database_connection() as connection:
+            rows = connection.execute(
+                """
+                SELECT DISTINCT ON (source_url)
+                       source_url, local_path, mime_type, checksum
+                FROM product_images
+                WHERE source_url = ANY(%s)
+                  AND local_path IS NOT NULL
+                  AND local_path <> ''
+                ORDER BY source_url, is_active DESC, updated_at DESC, id DESC
+                """,
+                (list(source_urls),),
+            ).fetchall()
+    except UndefinedTable:
+        # Lần đồng bộ đầu tiên có thể chạy trước khi schema catalog được tạo.
+        rows = []
 
-    return data if isinstance(data, dict) else {}
+    return {
+        str(row["source_url"]): {
+            "local_path": str(row["local_path"]),
+            "mime_type": str(row["mime_type"] or "image/jpeg"),
+            "checksum": str(row["checksum"] or ""),
+        }
+        for row in rows
+        if row.get("source_url") and row.get("local_path")
+    }
+
+
+def existing_local_path(
+    metadata: dict[str, str] | None,
+) -> Path | None:
+    if not metadata or not metadata.get("local_path"):
+        return None
+
+    image_root = PRODUCT_IMAGE_DIR.resolve()
+    image_path = (
+        PRODUCT_IMAGE_DIR / metadata["local_path"]
+    ).resolve()
+    try:
+        image_path.relative_to(image_root)
+    except ValueError:
+        return None
+    return image_path if image_path.is_file() else None
 
 
 def collect_images(
@@ -195,10 +235,8 @@ def download_image(
 
 def sync_product_images(
     products: list[dict[str, Any]] | None = None,
-    *,
-    remove_stale: bool = False,
-) -> dict[str, int]:
-    """Tải ảnh catalog về local và cập nhật manifest."""
+) -> dict[str, Any]:
+    """Tải ảnh catalog và trả metadata để importer ghi PostgreSQL."""
 
     if hasattr(sys.stdout, "reconfigure"):
         sys.stdout.reconfigure(
@@ -214,13 +252,11 @@ def sync_product_images(
         exist_ok=True,
     )
 
-    manifest = load_manifest()
-
     downloaded = 0
     skipped = 0
     failed = 0
-    removed_from_manifest = 0
     active_urls: set[str] = set()
+    tasks: list[tuple[str, str, Path, int, dict[str, Any]]] = []
 
     for wrapper in products:
         nested_product = wrapper.get("product")
@@ -262,105 +298,94 @@ def sync_product_images(
                 continue
 
             active_urls.add(image_url)
+            tasks.append((
+                code,
+                shopify_product_id,
+                product_dir,
+                position,
+                image,
+            ))
 
-            existing = manifest.get(image_url)
+    database_metadata = load_database_image_metadata(active_urls)
+    local_images: dict[str, dict[str, str]] = {}
 
-            if existing:
-                existing_path = (
-                    PRODUCT_IMAGE_DIR
-                    / existing.get("local_path", "")
-                )
+    for code, shopify_product_id, product_dir, position, image in tasks:
+        image_url = str(image.get("url") or "").strip()
+        existing = database_metadata.get(image_url)
+        existing_path = existing_local_path(existing)
+        if existing and existing_path:
+            local_images[image_url] = existing
+            skipped += 1
+            continue
 
-                if existing_path.is_file():
-                    skipped += 1
-                    continue
+        try:
+            image_bytes, mime_type = download_image(image_url)
 
-            try:
-                image_bytes, mime_type = (
-                    download_image(image_url)
-                )
+            extension = image_extension(
+                image_url=image_url,
+                mime_type=mime_type,
+            )
 
-                extension = image_extension(
-                    image_url=image_url,
-                    mime_type=mime_type,
-                )
+            filename = (
+                f"{shopify_product_id}_"
+                f"{position:02d}{extension}"
+            )
 
-                filename = (
-                    f"{shopify_product_id}_"
-                    f"{position:02d}{extension}"
-                )
+            image_path = product_dir / filename
+            image_path.write_bytes(image_bytes)
 
-                image_path = product_dir / filename
+            relative_path = image_path.relative_to(
+                PRODUCT_IMAGE_DIR
+            )
 
-                image_path.write_bytes(image_bytes)
+            local_images[image_url] = {
+                "local_path": relative_path.as_posix(),
+                "mime_type": mime_type,
+                "checksum": hashlib.sha256(image_bytes).hexdigest(),
+            }
 
-                relative_path = image_path.relative_to(
-                    PRODUCT_IMAGE_DIR
-                )
+            downloaded += 1
 
-                manifest[image_url] = {
-                    "local_path": relative_path.as_posix(),
-                    "mime_type": mime_type,
-                }
+            print(
+                f"Downloaded: {code} -> "
+                f"{relative_path}"
+            )
 
-                downloaded += 1
+        except Exception as error:
+            failed += 1
 
-                print(
-                    f"Downloaded: {code} -> "
-                    f"{relative_path}"
-                )
-
-            except Exception as error:
-                failed += 1
-
-                print(
-                    f"Failed: {code} | "
-                    f"{image_url} | {error}"
-                )
-
-    if remove_stale:
-        for stale_url in set(manifest) - active_urls:
-            manifest.pop(stale_url, None)
-            removed_from_manifest += 1
-
-    temporary_manifest_path = (
-        PRODUCT_IMAGE_MANIFEST_PATH.with_suffix(".json.tmp")
-    )
-    temporary_manifest_path.write_text(
-        json.dumps(
-            manifest,
-            ensure_ascii=False,
-            indent=2,
-        ),
-        encoding="utf-8",
-    )
-    temporary_manifest_path.replace(
-        PRODUCT_IMAGE_MANIFEST_PATH
-    )
+            print(
+                f"Failed: {code} | "
+                f"{image_url} | {error}"
+            )
 
     print("\n========== HOÀN THÀNH ==========")
     print(f"Đã tải: {downloaded}")
     print(f"Đã tồn tại: {skipped}")
     print(f"Lỗi: {failed}")
-    print(
-        "Đã loại khỏi manifest: "
-        f"{removed_from_manifest}"
-    )
-    print(
-        "Manifest: "
-        f"{PRODUCT_IMAGE_MANIFEST_PATH}"
-    )
+    print("Metadata ảnh sẽ được lưu trực tiếp vào PostgreSQL.")
 
     return {
         "downloaded": downloaded,
         "skipped": skipped,
         "failed": failed,
-        "removed_from_manifest": removed_from_manifest,
+        "local_images": local_images,
     }
 
 
 def main() -> None:
-    sync_product_images(remove_stale=True)
+    products = load_products()
+    result = sync_product_images(products)
+
+    # Không còn manifest trung gian: CLI cũng phải ghi metadata ảnh vào DB.
+    from app.services.product_import_service import (
+        import_products_to_database,
+    )
+    sync_run_id = import_products_to_database(
+        products,
+        local_images=result["local_images"],
+    )
+    print(f"Đã lưu metadata ảnh vào PostgreSQL: sync_run_id={sync_run_id}")
 
 
 if __name__ == "__main__":
