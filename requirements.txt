@@ -1,19 +1,33 @@
+# Web API và kiểm thử endpoint
 fastapi==0.139.0
 uvicorn[standard]==0.49.0
 pydantic==2.12.5
+python-multipart==0.0.32
+httpx==0.28.1
+
+# Cấu hình và HTTP client cho Shopify/Telegram/Facebook
 python-dotenv==1.0.1
-google-genai==2.8.0
-openai>=2.0.0,<3.0.0
-psycopg[binary]>=3.2,<4.0
-pgvector>=0.4,<1.0
-Pillow>=12.0,<13.0
 requests==2.34.2
-open-clip-torch
-torch
-torchvision
-python-multipart>=0.0.20,<1.0
-openpyxl>=3.1,<4.0
-pypdf>=5.0,<7.0
-google-api-python-client
-google-auth
-redis>=5.0,<7.0
+
+# AI providers
+google-genai==2.8.0
+openai==2.41.1
+
+# PostgreSQL, pgvector và Redis
+psycopg[binary]==3.3.4
+pgvector==0.5.0
+redis==8.1.0
+
+# Nhận diện ảnh và image embedding
+Pillow==12.3.0
+open-clip-torch==3.3.0
+torch==2.13.0
+torchvision==0.28.0
+
+# Import Excel và tài liệu Knowledge
+openpyxl==3.1.5
+pypdf==6.15.0
+
+# Xuất đơn hàng sang Google Sheets
+google-api-python-client==2.197.0
+google-auth==2.54.0
