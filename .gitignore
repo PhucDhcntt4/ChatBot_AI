@@ -17,3 +17,4 @@ products.json
 secrets/
 *.service.json
 log/
+prompts/.versions/

@@ -5,6 +5,8 @@
   width: 210px;
   padding: 26px 16px;
   box-sizing: border-box;
+  display: flex;
+  flex-direction: column;
   color: #fff;
   background:
     radial-gradient(circle at 15% 92%, rgba(255,255,255,.09), transparent 190px),
@@ -29,6 +31,84 @@
   background: #fff;
 }
 .admin-sidebar nav { display: grid; gap: 8px; }
+.admin-sidebar [hidden] { display: none !important; }
+.admin-sidebar-session {
+  display: grid;
+  gap: 11px;
+  margin-top: auto;
+  padding: 12px;
+  border: 1px solid rgba(255,255,255,.18);
+  border-radius: 12px;
+  background: rgba(84,0,14,.18);
+  box-shadow: inset 0 1px 0 rgba(255,255,255,.06);
+}
+.admin-sidebar-session[hidden] { display: none; }
+.admin-sidebar-user {
+  display: flex;
+  align-items: center;
+  gap: 9px;
+  min-width: 0;
+}
+.admin-sidebar-avatar {
+  display: grid;
+  place-items: center;
+  width: 31px;
+  height: 31px;
+  flex: none;
+  border-radius: 50%;
+  color: #a50f26;
+  background: #fff;
+  font-size: 8px;
+  box-shadow: 0 5px 13px rgba(45,0,7,.18);
+}
+.admin-sidebar-user-copy { min-width: 0; }
+.admin-sidebar-session small,
+.admin-sidebar-session strong { display: block; }
+.admin-sidebar-session small {
+  margin-bottom: 2px;
+  color: rgba(255,255,255,.67);
+  font-size: 9px;
+  line-height: 1.2;
+  white-space: nowrap;
+}
+.admin-sidebar-session strong {
+  overflow: hidden;
+  color: #fff;
+  font-size: 11.5px;
+  line-height: 1.35;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.admin-sidebar-session button {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 7px;
+  width: 100%;
+  min-height: 34px;
+  padding: 8px 10px;
+  color: #8f0c21;
+  background: #fff;
+  border: 1px solid rgba(255,255,255,.7);
+  border-radius: 9px;
+  font-size: 11px;
+  font-weight: 750;
+  cursor: pointer;
+  box-shadow: 0 7px 16px rgba(46,0,7,.16);
+  transition: transform .16s ease, box-shadow .16s ease, background .16s ease;
+}
+.admin-sidebar-session button:hover {
+  color: #fff;
+  background: #7f0a1c;
+  border-color: rgba(255,255,255,.24);
+  transform: translateY(-1px);
+  box-shadow: 0 9px 18px rgba(46,0,7,.24);
+}
+.admin-sidebar-session button svg {
+  width: 15px;
+  height: 15px;
+  flex: none;
+}
 .admin-sidebar nav a {
   display: flex;
   align-items: center;
@@ -75,4 +155,8 @@ body.has-admin-sidebar > main { margin-left: 210px; }
   .admin-sidebar nav a { padding: 9px 10px; font-size: 12px; gap: 5px; }
   body.has-admin-sidebar > .top,
   body.has-admin-sidebar > main { margin-left: 0; }
+  .admin-sidebar-session { margin: 0 0 0 4px; padding: 0; border: 0; background: transparent; box-shadow: none; }
+  .admin-sidebar-user { display: none; }
+  .admin-sidebar-session button { width: 36px; min-height: 36px; padding: 0; border-radius: 10px; }
+  .admin-sidebar-session button span { display: none; }
 }

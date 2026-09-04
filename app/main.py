@@ -1,6 +1,8 @@
 from contextlib import asynccontextmanager
 import logging
 from pathlib import Path
+from time import perf_counter
+from uuid import uuid4
 
 from fastapi import FastAPI, File, Form, HTTPException, Request, UploadFile # type: ignore
 from fastapi.responses import RedirectResponse# type: ignore
@@ -24,7 +26,11 @@ from app.conversation.image_service import ProductImageConversationService
 from app.conversation.models import ChatRequest, ConversationResponse, ResetRequest
 from app.conversation.service import ConversationService
 from app.database.product_repository import ProductRepository
-from app.logging_config import setup_logging
+from app.logging_config import log_bot_response, setup_logging
+from app.middleware import AdminAuthMiddleware
+from app.routes.admin_auth_router import router as admin_auth_router
+from app.routes.admin_user_router import router as admin_user_router
+from app.routes.admin_environment_router import router as admin_environment_router
 from app.routes.admin_product_router import router as admin_product_router
 from app.routes.admin_knowledge_router import router as admin_knowledge_router
 from app.routes.admin_prompt_router import router as admin_prompt_router
@@ -32,11 +38,11 @@ from app.routes.admin_conversation_router import router as admin_conversation_ro
 from app.routes.telegram_router import router as telegram_router
 from app.routes.facebook_router import router as facebook_router
 from app.services.conversation_history_service import ConversationHistoryService
+from app.services.admin_auth_service import admin_auth_service
 from app.services.sheets_service import SheetsService
 from  app.services.human_mode_service import HumanModeService
 
 
-setup_logging(service_name="app")
 logger = logging.getLogger("uvicorn.error")
 STATIC_DIR = Path(__file__).resolve().parent / "static"
 
@@ -69,6 +75,15 @@ def create_knowledge_search():
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
+    # Configure rotating application logs only when the real ASGI lifespan
+    # starts. Importing app.main in unit tests must not pollute production logs.
+    setup_logging(service_name="app")
+    admin_auth_service.validate()
+    logger.info(
+        "Admin authentication enabled=%s cookie_secure=%s",
+        admin_auth_service.enabled,
+        admin_auth_service.cookie_secure,
+    )
     ai = create_ai_provider()
     executor = ConversationExecutor(
         products=ProductRepository(),
@@ -92,6 +107,8 @@ async def lifespan(app: FastAPI):
     app.state.image_conversation_service = image_conversation_service
     app.state.conversation_history_service = conversation_history_service
     app.state.human_mode_service = human_mode_service
+    app.state.admin_auth_service = admin_auth_service
+    app.state.admin_user_repository = admin_auth_service.repository
     app.state.channel_dispatcher = ChannelDispatcher(
         conversation_service,
         image_conversation_service,
@@ -119,6 +136,13 @@ app = FastAPI(
     version="1.0.0",
     lifespan=lifespan,
 )
+app.state.runtime_id = uuid4().hex
+app.state.admin_auth_service = admin_auth_service
+app.state.admin_user_repository = admin_auth_service.repository
+app.add_middleware(AdminAuthMiddleware, auth_service=admin_auth_service)
+app.include_router(admin_auth_router)
+app.include_router(admin_user_router)
+app.include_router(admin_environment_router)
 app.include_router(admin_product_router)
 app.include_router(admin_knowledge_router)
 app.include_router(admin_prompt_router)
@@ -144,6 +168,7 @@ def health(request: Request):
         database_error = str(error)
     return {
         "status": "ok" if service else "starting",
+        "runtime_id": request.app.state.runtime_id,
         "ai_provider": service.ai.provider_name if service else AI_PROVIDER,
         "ai_model": service.ai.model if service else None,
         "database": database,
@@ -162,6 +187,7 @@ def health(request: Request):
 
 @app.post("/api/chat", response_model=ConversationResponse)
 def chat(data: ChatRequest, request: Request):
+    started = perf_counter()
     dispatcher = getattr(request.app.state, "channel_dispatcher", None)
     if WEB_CHAT_CHANNEL not in CHANNEL_PROVIDERS:
         raise HTTPException(status_code=503, detail="Kênh web chưa được bật.")
@@ -180,6 +206,13 @@ def chat(data: ChatRequest, request: Request):
         )
         if history_service is not None:
             history_service.mark_sent(history_message_id)
+        log_bot_response(
+            logger,
+            channel=WEB_CHAT_CHANNEL,
+            session_id=data.session_id,
+            response=response,
+            total_seconds=perf_counter() - started,
+        )
         return response
     except Exception as error:
         logger.exception("Conversation V2 failed")
@@ -194,6 +227,7 @@ async def chat_image(
     channel: str = Form("web"),
     caption: str = Form(""),
 ):
+    started = perf_counter()
     dispatcher = getattr(request.app.state, "channel_dispatcher", None)
     if WEB_CHAT_CHANNEL not in CHANNEL_PROVIDERS:
         raise HTTPException(status_code=503, detail="Kênh web chưa được bật.")
@@ -219,6 +253,13 @@ async def chat_image(
         )
         if history_service is not None:
             history_service.mark_sent(history_message_id)
+        log_bot_response(
+            logger,
+            channel=WEB_CHAT_CHANNEL,
+            session_id=session_id,
+            response=response,
+            total_seconds=perf_counter() - started,
+        )
         return response
     except ValueError as error:
         raise HTTPException(status_code=422, detail=str(error)) from error

@@ -1,0 +1,109 @@
+<!doctype html>
+<html lang="vi">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width,initial-scale=1" />
+    <title>Đăng nhập · Đông Hải AI</title>
+    <link
+      rel="stylesheet"
+      href="/static/css/admin_pages.css?v=20260903-login1"
+    />
+    <link
+      rel="stylesheet"
+      href="/static/css/login_admin.css?v=20260904-login2"
+    />
+  </head>
+  <body class="login-page">
+    <div class="login-orb"></div>
+    <main class="login-card">
+      <div class="login-brand">
+        <img src="/static/assets/logo.jpg" alt="Đông Hải" />
+      </div>
+      <h1>Đăng nhập hệ thống</h1>
+      <p class="login-sub"></p>
+
+      <form id="loginForm">
+        <label for="loginUser">Tài khoản</label>
+        <input
+          id="loginUser"
+          name="username"
+          type="text"
+          autocomplete="username"
+          placeholder="Tên đăng nhập"
+          maxlength="100"
+          required
+          autofocus
+        />
+
+        <label for="loginPass">Mật khẩu</label>
+        <div class="password-field">
+          <input
+            id="loginPass"
+            name="password"
+            type="password"
+            autocomplete="current-password"
+            placeholder="••••••••"
+            maxlength="500"
+            required
+          />
+          <button
+            class="toggle-password"
+            id="togglePassword"
+            type="button"
+            aria-label="Hiện mật khẩu"
+            title="Hiện mật khẩu"
+          >
+            <svg
+              class="eye-open"
+              viewBox="0 0 24 24"
+              fill="none"
+              stroke="currentColor"
+              stroke-width="1.8"
+              stroke-linecap="round"
+              stroke-linejoin="round"
+            >
+              <path
+                d="M1.5 12S5 5 12 5s10.5 7 10.5 7-3.5 7-10.5 7S1.5 12 1.5 12Z"
+              />
+              <circle cx="12" cy="12" r="3" />
+            </svg>
+            <svg
+              class="eye-closed"
+              viewBox="0 0 24 24"
+              fill="none"
+              stroke="currentColor"
+              stroke-width="1.8"
+              stroke-linecap="round"
+              stroke-linejoin="round"
+              hidden
+            >
+              <path d="M3 3l18 18" />
+              <path d="M10.6 10.6a3 3 0 0 0 4.24 4.24" />
+              <path
+                d="M6.6 6.7C3.9 8.4 1.5 12 1.5 12s3.5 7 10.5 7c1.9 0 3.5-.4 4.9-1.1"
+              />
+              <path
+                d="M17.5 17.4C20.2 15.6 22.5 12 22.5 12s-1.2-2.4-3.4-4.4C17 5.9 14.7 5 12 5c-.7 0-1.4.06-2.1.2"
+              />
+            </svg>
+          </button>
+        </div>
+
+        <div class="login-row">
+          <label class="remember-me">
+            <input id="rememberMe" type="checkbox" />
+            <span class="check"></span>
+            Ghi nhớ đăng nhập
+          </label>
+          <a class="forgot-link" href="#" id="forgotLink">Quên mật khẩu?</a>
+        </div>
+
+        <button id="loginButton" type="submit">Đăng nhập</button>
+        <div class="notice" id="loginNotice" role="status"></div>
+      </form>
+
+      <div class="login-foot">Được phát triển bởi <b>Đông Hải</b></div>
+    </main>
+    <script src="/static/js/login_admin.js?v=20260904-login2" defer></script>
+  </body>
+</html>

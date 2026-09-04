@@ -8,15 +8,19 @@ PROJECT_ROOT = Path(__file__).resolve().parent.parent
 load_dotenv(PROJECT_ROOT / ".env")
 
 PROMPT_DIR = PROJECT_ROOT / "prompts"
+INTERNAL_PROMPT_DIR = PROJECT_ROOT / "app" / "ai" / "internal_prompts"
 DATA_DIR = PROJECT_ROOT / "data"
 KNOWLEDGE_DIR = PROJECT_ROOT / "knowledge"
 CONVERSATION_INSTRUCTION_PATH = PROMPT_DIR / "instruction.txt"
 CTA_TEMPLATE_PATH = PROMPT_DIR / "cta_templates.txt"
 FAST_RESPONSE_PATH = PROMPT_DIR / "fast_responses.txt"
 PROMOTION_RULES_PATH = PROMPT_DIR / "promotion_rules.txt"
+PLANNER_CONTRACT_PATH = INTERNAL_PROMPT_DIR / "planner_contract.txt"
+PRESENTER_CONTRACT_PATH = INTERNAL_PROMPT_DIR / "presenter_contract.txt"
 
 DATABASE_URL = os.getenv("DATABASE_URL", "").strip()
 AI_PROVIDER = os.getenv("AI_PROVIDER", "gemini").strip().casefold()
+AI_FALLBACK_PROVIDER = os.getenv("AI_FALLBACK_PROVIDER", "").strip().casefold()
 GEMINI_MODEL = os.getenv("GEMINI_MODEL", "gemini-3.1-flash-lite").strip()
 OPENAI_MODEL = os.getenv("OPENAI_MODEL", "gpt-5-mini").strip()
 
@@ -99,7 +103,6 @@ PRODUCT_CATALOG_SOURCE = "database"
 PRODUCT_IMAGE_DIR = DATA_DIR / "product_images"
 IMAGE_INTENT_PROMPT_PATH = PROMPT_DIR / "image_intent.txt"
 PRODUCT_RECOGNITION_PROMPT_PATH = PROMPT_DIR / "product_recognition.txt"
-PRODUCT_REPLY_PROMPT_PATH = PROMPT_DIR / "product_reply.txt"
 PRODUCT_VECTOR_SEARCH_ENABLED = env_bool("PRODUCT_VECTOR_SEARCH_ENABLED", True)
 IMAGE_EMBEDDING_MODEL = os.getenv("IMAGE_EMBEDDING_MODEL", "ViT-B-32").strip()
 IMAGE_EMBEDDING_PRETRAINED = os.getenv(
@@ -129,3 +132,15 @@ HUMAN_MODE_ENABLED = (
 HUMAN_MODE_TTL_SECONDS = int(
     os.getenv("HUMAN_MODE_TTL_SECONDS", "86400")
 )
+
+# Admin authentication. Disabled by default so an existing local installation
+# is not locked out before credentials are configured in .env.
+ADMIN_AUTH_ENABLED = env_bool("ADMIN_AUTH_ENABLED", False)
+ADMIN_SESSION_SECRET = os.getenv("ADMIN_SESSION_SECRET", "").strip()
+ADMIN_SESSION_TTL_SECONDS = int(
+    os.getenv("ADMIN_SESSION_TTL_SECONDS", "43200")
+)
+ADMIN_REMEMBER_TTL_SECONDS = int(
+    os.getenv("ADMIN_REMEMBER_TTL_SECONDS", "2592000")
+)
+ADMIN_COOKIE_SECURE = env_bool("ADMIN_COOKIE_SECURE", False)

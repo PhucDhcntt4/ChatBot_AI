@@ -5,6 +5,8 @@
     ["/admin/knowledge", "▤", "Knowledge"],
     ["/admin/prompts", "✎", "Prompt"],
     ["/admin/conversations", "☰", "Hội thoại"],
+    ["/admin/users", "♙", "Tài khoản", true],
+    ["/admin/environment", "⚙", "Biến môi trường", true],
   ];
   const sidebar = document.querySelector(".admin-sidebar");
   if (sidebar) {
@@ -12,7 +14,49 @@
       <a class="admin-sidebar-brand" href="/admin/products">
         <img src="/static/assets/logo.jpg" alt="Đông Hải"><span>Đông Hải AI</span>
       </a>
-      <nav>${links.map(([href, icon, label]) => `<a href="${href}" class="${path.startsWith(href) ? "active" : ""}"><span>${icon}</span>${label}</a>`).join("")}</nav>`;
+      <nav>${links.map(([href, icon, label, adminOnly]) => `<a href="${href}" ${adminOnly ? 'data-admin-only hidden' : ''} class="${path.startsWith(href) ? "active" : ""}"><span>${icon}</span>${label}</a>`).join("")}</nav>
+      <div class="admin-sidebar-session" id="adminSession" hidden>
+        <div class="admin-sidebar-user">
+          <span class="admin-sidebar-avatar" id="adminAvatar" aria-hidden="true">A</span>
+          <div class="admin-sidebar-user-copy">
+            <small>Đang đăng nhập</small>
+            <strong id="adminUsername"></strong>
+          </div>
+        </div>
+        <button id="adminLogout" type="button" title="Đăng xuất" aria-label="Đăng xuất">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M10 17l5-5-5-5"/><path d="M15 12H3"/><path d="M14 3h4a3 3 0 0 1 3 3v12a3 3 0 0 1-3 3h-4"/></svg>
+          <span>Đăng xuất</span>
+        </button>
+      </div>`;
+
+    fetch("/admin/session", { headers: { Accept: "application/json" } })
+      .then(async (response) => {
+        if (response.status === 401) {
+          const next = encodeURIComponent(window.location.pathname + window.location.search);
+          window.location.replace(`/admin/login?next=${next}`);
+          return null;
+        }
+        return response.ok ? response.json() : null;
+      })
+      .then((session) => {
+        if (!session?.enabled || !session.authenticated) return;
+        document.getElementById("adminUsername").textContent =
+          session.display_name || session.username;
+        document.getElementById("adminAvatar").textContent =
+          (session.display_name || session.username || "A").trim().charAt(0).toUpperCase();
+        document.getElementById("adminSession").hidden = false;
+        document.querySelectorAll("[data-admin-only]").forEach((link) => {
+          if (session.role === "admin") link.hidden = false;
+          else link.remove();
+        });
+      })
+      .catch(() => {});
+
+    document.getElementById("adminLogout").addEventListener("click", async () => {
+      const response = await fetch("/admin/logout", { method: "POST" });
+      const data = await response.json().catch(() => ({}));
+      window.location.replace(data.redirect || "/admin/login");
+    });
   }
 
   if (!document.getElementById("chatPanel")) {

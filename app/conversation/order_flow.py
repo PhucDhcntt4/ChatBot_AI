@@ -122,6 +122,35 @@ class OrderFlowService:
         ]
 
     @staticmethod
+    def _remove_empty_pending_duplicates(
+        context: ConversationContext,
+    ) -> bool:
+        """Remove empty pending rows already represented by a cart item."""
+
+        cart_codes = {
+            item.get("product_code")
+            for item in context.cart_items
+            if item.get("product_code")
+        }
+        before = len(context.pending_items)
+        context.pending_items = [
+            item
+            for item in context.pending_items
+            if not (
+                item.get("product_code") in cart_codes
+                and not item.get("color")
+                and not item.get("size")
+                and not item.get("quantity")
+                and set(item.get("missing_fields") or []).issubset({
+                    "color",
+                    "size",
+                    "quantity",
+                })
+            )
+        ]
+        return len(context.pending_items) < before
+
+    @staticmethod
     def _restore_current_from_pending(
         context: ConversationContext,
         item: dict[str, Any],
@@ -315,11 +344,21 @@ class OrderFlowService:
         self,
         plan: ConversationPlan,
         context: ConversationContext,
-        product: dict[str, Any] | None,
+        products: list[dict[str, Any]],
     ) -> list[str]:
         errors: list[str] = []
+        first_pending: dict[str, Any] | None = None
+        last_completed: dict[str, Any] | None = None
         for requested in plan.requested_items:
             code = requested.product_code or plan.reference_product_code
+            product = next(
+                (
+                    item
+                    for item in products
+                    if item.get("product_code") == code
+                ),
+                products[0] if len(products) == 1 else None,
+            )
             if not product or product.get("product_code") != code:
                 errors.append(f"product_not_found:{code}")
                 continue
@@ -333,17 +372,42 @@ class OrderFlowService:
             )
             item_context.draft_quantity = requested.quantity
             self._apply_product_defaults(item_context, product)
-            if self.missing_product_fields(item_context, product):
-                errors.append("item_fields_missing")
-                continue
+            missing_fields = self.missing_product_fields(item_context, product)
             item_errors = self._product_errors(item_context, product)
-            if item_errors:
+            if missing_fields or item_errors:
+                pending = {
+                    "product_code": code,
+                    "product_name": product.get("product_name"),
+                    "color": item_context.draft_color,
+                    "size": item_context.draft_size,
+                    "quantity": item_context.draft_quantity,
+                    "missing_fields": list(missing_fields or item_errors),
+                }
+                existing_index = next(
+                    (
+                        index
+                        for index, existing in enumerate(context.pending_items)
+                        if existing.get("product_code") == code
+                    ),
+                    None,
+                )
+                if existing_index is None:
+                    context.pending_items.append(pending)
+                else:
+                    context.pending_items[existing_index] = pending
+                if first_pending is None:
+                    first_pending = pending
                 errors.extend(f"{code}:{error}" for error in item_errors)
                 continue
             item = self._current_item(item_context, product)
             if item:
                 self._upsert_item(context, item)
-                self._restore_current_from_item(context, item)
+                self._remove_pending_item(context, code)
+                last_completed = item
+        if first_pending:
+            self._restore_current_from_pending(context, first_pending)
+        elif last_completed:
+            self._restore_current_from_item(context, last_completed)
         return errors
 
     @staticmethod
@@ -555,7 +619,85 @@ class OrderFlowService:
             result.facts["order_cancelled"] = True
             return
 
+        has_product_mutation = bool(
+            plan.requested_color
+            or plan.requested_size
+            or plan.requested_quantity
+            or plan.requested_items
+            or plan.order_action in {"change", "add_item", "remove_item"}
+        )
+        has_contact_update = bool(
+            plan.customer_name
+            or plan.customer_phone
+            or plan.shipping_address
+            or plan.payment_method
+        )
+        can_reconcile_order = bool(
+            context.cart_items
+            and not has_product_mutation
+            and (
+                has_contact_update
+                or not self.missing_contact_fields(context)
+                or plan.order_action == "confirm"
+            )
+        )
+        if can_reconcile_order and self._remove_empty_pending_duplicates(context):
+            preferred_code = (
+                plan.reference_product_code
+                or context.draft_product_code
+                or context.latest_product_code
+            )
+            current_item = next(
+                (
+                    item
+                    for item in reversed(context.cart_items)
+                    if item.get("product_code") == preferred_code
+                ),
+                context.cart_items[-1],
+            )
+            self._restore_current_from_item(context, current_item)
+            context.sales_stage = (
+                SalesStage.COLLECTING_CONTACT
+                if self.missing_contact_fields(context)
+                else SalesStage.AWAITING_FINAL_CONFIRMATION
+            )
+            result.facts["stale_pending_items_removed"] = True
+
         product = self._matching_product(result, plan.reference_product_code)
+        preserve_completed_selection = bool(
+            context.cart_items
+            and not has_product_mutation
+            and (
+                has_contact_update
+                or context.sales_stage in {
+                    SalesStage.COLLECTING_CONTACT,
+                    SalesStage.AWAITING_FINAL_CONFIRMATION,
+                }
+            )
+        )
+        preserved_product_code: str | None = None
+        if preserve_completed_selection:
+            preserved_item = next(
+                (
+                    item
+                    for item in reversed(context.cart_items)
+                    if item.get("product_code") == plan.reference_product_code
+                ),
+                next(
+                    (
+                        item
+                        for item in reversed(context.cart_items)
+                        if item.get("product_code") == context.draft_product_code
+                    ),
+                    context.cart_items[-1],
+                ),
+            )
+            self._restore_current_from_item(context, preserved_item)
+            preserved_product_code = preserved_item.get("product_code")
+            product = (
+                self._matching_product(result, preserved_product_code)
+                or product
+            )
         if plan.order_action == "remove_item":
             remove_code = (
                 plan.reference_product_code
@@ -658,7 +800,8 @@ class OrderFlowService:
             return
 
         product_code = (
-            (product or {}).get("product_code")
+            preserved_product_code
+            or (product or {}).get("product_code")
             or plan.reference_product_code
             or context.draft_product_code
             or context.latest_product_code
@@ -740,8 +883,12 @@ class OrderFlowService:
         requested_item_errors = self._apply_requested_items(
             plan,
             context,
-            product,
+            result.products,
         )
+
+        # requested_items can contain several product codes. Continue the
+        # flow with the product that is currently active after applying them.
+        product = self._matching_product(result, context.draft_product_code) or product
 
         missing_product = self.missing_product_fields(context, product)
         # Validate every supplied variant before asking for later fields such

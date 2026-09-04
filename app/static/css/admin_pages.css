@@ -487,6 +487,14 @@ tbody tr:hover td {
   opacity: 0;
   cursor: pointer;
 }
+.new-category-field[hidden] {
+  display: none;
+}
+.new-category-field .field-hint {
+  margin: 6px 2px 0;
+  color: var(--muted);
+  font-size: 12px;
+}
 .file-chip {
   display: none;
   align-items: center;
@@ -1260,13 +1268,25 @@ td.num {
   color: #fff;
   background: linear-gradient(135deg, #bd1832, #940d22);
 }
-.history-message span {
-  display: block;
+.history-message-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
   margin-bottom: 5px;
+}
+.history-message-header span,
+.history-message-header time {
   font-size: 11px;
   font-weight: 750;
   opacity: 0.72;
+}
+.history-message-header span {
   text-transform: uppercase;
+}
+.history-message-header time {
+  font-weight: 600;
+  white-space: nowrap;
 }
 .history-message p {
   margin: 0;

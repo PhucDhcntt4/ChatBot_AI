@@ -1,0 +1,451 @@
+HƯỚNG DẪN CÀI ĐẶT 
+
+Cập nhật: 04/09/2026
+
+Tài liệu này hướng dẫn cài dự án trên Windows để phát triển và vận hành nội bộ.
+Hướng dẫn triển khai máy chủ Ubuntu/production nằm trong file DEPLOYMENT.md.
+
+
+1. THÀNH PHẦN CỦA HỆ THỐNG
+
+- FastAPI/Uvicorn: web, API, trang quản trị và webhook.
+- PostgreSQL + pgvector: sản phẩm, vector, Knowledge và lịch sử hội thoại.
+- Redis: trạng thái hội thoại, Human mode và hàng đợi đồng bộ sản phẩm.
+- Product sync worker: đồng bộ Shopify, tải ảnh và tạo image embedding.
+- Gemini hoặc OpenAI: lập kế hoạch và soạn câu trả lời.
+- Google Sheets: nhận đơn đã xác nhận (không bắt buộc).
+
+
+2. YÊU CẦU TRƯỚC KHI CÀI
+
+- Python 3.11 trở lên. Khuyến nghị Python 3.11 64-bit.
+- PostgreSQL và extension pgvector.
+- Redis 7 trở lên. Trên Windows nên chạy Redis bằng Docker Desktop.
+- Git nếu tải source từ Git.
+- Khoảng 8 GB RAM trở lên nếu dùng nhận diện ảnh CLIP.
+- API key Gemini hoặc OpenAI.
+
+Chỉ cần cài Shopify, Telegram, Facebook và Google Sheets khi thực sự dùng các
+tích hợp tương ứng.
+
+Kiểm tra Python:
+
+    python --version
+    python -m pip --version
+
+Nếu lệnh "python" không tồn tại, cài Python và chọn "Add Python to PATH".
+
+
+3. MỞ THƯ MỤC DỰ ÁN
+
+Mở PowerShell rồi chạy:
+
+    cd "D:\ĐÔNG HẢI\DATA\BOT_Conversation_V2"
+
+Các lệnh còn lại trong tài liệu đều phải chạy tại thư mục này.
+
+
+4. TẠO MÔI TRƯỜNG PYTHON RIÊNG
+
+Không cài thư viện vào Python toàn cục vì dễ xung đột với dự án khác.
+
+    python -m venv .venv
+    .\.venv\Scripts\Activate.ps1
+    python -m pip install --upgrade pip
+    python -m pip install -r requirements.txt
+
+Khi kích hoạt thành công, đầu dòng PowerShell sẽ có chữ (.venv).
+
+Nếu PowerShell chặn Activate.ps1, chạy lệnh sau trong đúng cửa sổ hiện tại:
+
+    Set-ExecutionPolicy -Scope Process -ExecutionPolicy Bypass
+    .\.venv\Scripts\Activate.ps1
+
+Kiểm tra thư viện:
+
+    python -m pip check
+
+Mỗi lần mở terminal mới, cần vào thư mục dự án và kích hoạt lại .venv.
+
+
+5. CÀI VÀ CHẠY REDIS
+
+Cách khuyến nghị trên Windows là dùng Docker Desktop:
+
+    docker run -d --name donghai-redis -p 6379:6379 redis:7-alpine
+    docker exec donghai-redis redis-cli ping
+
+Kết quả đúng:
+
+    PONG
+
+Các lần sau chỉ cần chạy lại container nếu nó đang dừng:
+
+    docker start donghai-redis
+
+Không tạo container mới nếu container donghai-redis đã tồn tại.
+
+
+6. TẠO POSTGRESQL DATABASE VÀ PGVECTOR
+
+Tạo database bằng pgAdmin hoặc lệnh:
+
+    createdb -h 127.0.0.1 -U postgres donghai_bot
+
+Khai báo URL database cho cửa sổ PowerShell đang dùng:
+
+    $env:DATABASE_URL = "postgresql://postgres:MAT_KHAU@127.0.0.1:5432/donghai_bot"
+
+Thay MAT_KHAU bằng mật khẩu PostgreSQL thật. Nếu mật khẩu chứa ký tự đặc biệt,
+cần URL-encode mật khẩu hoặc dùng một mật khẩu an toàn không gây lỗi URL.
+
+Bật pgvector:
+
+    psql "$env:DATABASE_URL" -c "CREATE EXTENSION IF NOT EXISTS vector;"
+
+Nếu PostgreSQL báo không tìm thấy extension vector, phải cài pgvector tương
+thích với phiên bản PostgreSQL trước khi tiếp tục.
+
+Chạy migration theo đúng thứ tự:
+
+    psql "$env:DATABASE_URL" -v ON_ERROR_STOP=1 -f db_postgre/001_product_catalog.sql
+    psql "$env:DATABASE_URL" -v ON_ERROR_STOP=1 -f db_postgre/002_product_image_embeddings.sql
+    psql "$env:DATABASE_URL" -v ON_ERROR_STOP=1 -f db_postgre/003_customer_care_rag.sql
+    psql "$env:DATABASE_URL" -v ON_ERROR_STOP=1 -f db_postgre/004_conversation_history.sql
+    psql "$env:DATABASE_URL" -v ON_ERROR_STOP=1 -f db_postgre/005_admin_users.sql
+
+Nếu máy không nhận lệnh psql/createdb, thêm thư mục bin của PostgreSQL vào PATH,
+ví dụ C:\Program Files\PostgreSQL\16\bin, hoặc chạy lệnh bằng đường dẫn đầy đủ.
+
+
+7. TẠO FILE .env
+
+Tạo file có tên chính xác là ".env" tại thư mục gốc dự án, cùng cấp với
+requirements.txt. Không đặt tên là .env.txt.
+
+Cấu hình tối thiểu để chạy Web bằng Gemini:
+
+    # Database và Redis
+    DATABASE_URL=postgresql://postgres:MAT_KHAU@127.0.0.1:5432/donghai_bot
+    REDIS_URL=redis://127.0.0.1:6379/0
+    REDIS_CONVERSATION_ENABLED=true
+    REDIS_CONVERSATION_TTL_SECONDS=604800
+    CONVERSATION_HISTORY_LIMIT=12
+
+    # AI
+    AI_PROVIDER=gemini
+    AI_FALLBACK_PROVIDER=
+    GEMINI_API_KEY=DIEN_API_KEY_GEMINI
+    GEMINI_MODEL=gemini-3.1-flash-lite
+    OPENAI_API_KEY=
+    OPENAI_MODEL=gpt-5-mini
+
+    # Kênh chạy lần đầu
+    CHANNEL_PROVIDER=web
+
+    # RAG
+    RAG_ENABLED=true
+    RAG_EMBEDDING_PROVIDER=gemini
+    RAG_EMBEDDING_MODEL=gemini-embedding-001
+    RAG_EMBEDDING_DIMENSION=768
+    RAG_TOP_K=5
+    RAG_MIN_SIMILARITY=0.45
+
+    # Nhận diện ảnh
+    PRODUCT_VECTOR_SEARCH_ENABLED=true
+    IMAGE_EMBEDDING_MODEL=ViT-B-32
+    IMAGE_EMBEDDING_PRETRAINED=laion2b_s34b_b79k
+    VECTOR_SEARCH_LIMIT=30
+    VECTOR_MIN_SIMILARITY=0.35
+    VECTOR_AUTO_ACCEPT_SIMILARITY=0.96
+    VECTOR_MIN_MARGIN=0.08
+    VECTOR_MAX_CANDIDATES=3
+
+    # Human mode
+    HUMAN_MODE_ENABLED=true
+    HUMAN_MODE_TTL_SECONDS=600
+
+    # Đăng nhập quản trị
+    ADMIN_AUTH_ENABLED=true
+    ADMIN_SESSION_SECRET=THAY_BANG_CHUOI_NGAU_NHIEN_IT_NHAT_32_KY_TU
+    ADMIN_SESSION_TTL_SECONDS=43200
+    ADMIN_REMEMBER_TTL_SECONDS=2592000
+    ADMIN_COOKIE_SECURE=false
+
+    # Google Sheets: tắt trong lần cài đầu
+    GOOGLE_SHEETS_ENABLED=false
+    GOOGLE_SHEETS_SPREADSHEET_ID=
+    GOOGLE_SHEETS_ORDERS_RANGE=Orders!A:V
+    GOOGLE_SERVICE_ACCOUNT_FILE=secrets/google-sheets-service-account.json
+
+    # Log
+    LOG_LEVEL=INFO
+    LOG_TO_FILE=false
+    LOG_ACCESS_ENABLED=false
+    LOG_DIR=log
+    LOG_MAX_BYTES=10485760
+    LOG_BACKUP_COUNT=10
+
+Tạo ADMIN_SESSION_SECRET ngẫu nhiên trong PowerShell:
+
+    [Convert]::ToHexString([Security.Cryptography.RandomNumberGenerator]::GetBytes(32)).ToLower()
+
+Sao chép kết quả và gán nguyên chuỗi vào ADMIN_SESSION_SECRET. Mọi web process
+của cùng một hệ thống phải dùng cùng secret. Không chia sẻ hoặc commit file .env.
+
+Nếu dùng OpenAI làm AI chính:
+
+    AI_PROVIDER=openai
+    OPENAI_API_KEY=DIEN_API_KEY_OPENAI
+
+Có thể cấu hình provider dự phòng khác provider chính, ví dụ:
+
+    AI_PROVIDER=gemini
+    AI_FALLBACK_PROVIDER=openai
+
+Khi đó phải điền cả GEMINI_API_KEY và OPENAI_API_KEY.
+
+
+8. CẤU HÌNH CÁC TÍCH HỢP TÙY CHỌN
+
+8.1. Shopify và đồng bộ sản phẩm
+
+Thêm vào .env:
+
+    SHOP=TEN_SHOP
+    SHOPIFY_TOKEN=TOKEN_SHOPIFY
+    SHOPIFY_API_VERSION=2025-07
+
+Worker phải đang chạy thì job đồng bộ trên giao diện mới được xử lý.
+
+8.2. Telegram
+
+Thêm telegram vào CHANNEL_PROVIDER và khai báo token:
+
+    CHANNEL_PROVIDER=web,telegram
+    TELEGRAM_BOT_TOKEN=TOKEN_BOT
+    TELEGRAM_WEBHOOK_SECRET=CHUOI_BI_MAT_WEBHOOK
+
+Webhook:
+
+    https://TEN_MIEN/api/telegram/webhook
+
+Xem thêm file TELEGRAM_SETUP.md.
+
+8.3. Facebook Messenger
+
+    CHANNEL_PROVIDER=web,facebook
+    FACEBOOK_PAGE_ACCESS_TOKEN=PAGE_ACCESS_TOKEN
+    FACEBOOK_VERIFY_TOKEN=VERIFY_TOKEN_TU_TAO
+    FACEBOOK_APP_SECRET=APP_SECRET
+    FACEBOOK_GRAPH_API_VERSION=v23.0
+
+Callback URL:
+
+    https://TEN_MIEN/webhook/facebook
+
+Nếu dùng đồng thời cả ba kênh:
+
+    CHANNEL_PROVIDER=web,telegram,facebook
+
+8.4. Google Sheets
+
+1. Tạo Google service account và bật Google Sheets API.
+2. Tải file JSON credential vào secrets/google-sheets-service-account.json.
+3. Chia sẻ Google Sheet cho email service account với quyền Editor.
+4. Tạo sheet Orders và cấu hình:
+
+    GOOGLE_SHEETS_ENABLED=true
+    GOOGLE_SHEETS_SPREADSHEET_ID=ID_CUA_GOOGLE_SHEET
+    GOOGLE_SHEETS_ORDERS_RANGE=Orders!A:V
+    GOOGLE_SERVICE_ACCOUNT_FILE=secrets/google-sheets-service-account.json
+
+Nên để GOOGLE_SHEETS_ENABLED=false đến khi web đã chạy ổn.
+
+
+9. TẠO TÀI KHOẢN QUẢN TRỊ ĐẦU TIÊN
+
+Đảm bảo migration 005 đã chạy và .env có DATABASE_URL đúng, sau đó chạy:
+
+    python -m app.scripts.create_admin_user --username admin --display-name "Quản trị viên"
+
+Nhập mật khẩu hai lần. Mật khẩu phải có từ 3 ký tự và hai lần nhập phải giống
+nhau. Database chỉ lưu password hash, không lưu mật khẩu thuần.
+
+Đổi mật khẩu tài khoản đã tồn tại:
+
+    python -m app.scripts.create_admin_user --username admin --update-password
+
+
+10. KIỂM TRA TRƯỚC KHI CHẠY
+
+    python -m compileall -q app
+    python -m unittest discover -s tests -q
+
+Kết quả hiện tại hợp lệ là 173 test và dòng cuối là OK.
+
+Một số test cố ý tạo lỗi giả lập AI, database, Facebook hoặc Google Sheets để
+kiểm tra fallback/retry. Có traceback trong phần log nhưng cuối cùng vẫn OK thì
+không phải lỗi cài đặt.
+
+
+11. CHẠY DỰ ÁN
+
+Cách nhanh:
+
+    powershell -ExecutionPolicy Bypass -File .\start.ps1
+
+start.ps1 sẽ:
+
+- Mở product sync worker ở một cửa sổ PowerShell riêng.
+- Chạy FastAPI tại http://127.0.0.1:8000.
+- Theo dõi thay đổi source và file .env trong môi trường phát triển.
+
+Cách chạy thủ công bằng hai terminal:
+
+Terminal 1:
+
+    cd "D:\ĐÔNG HẢI\DATA\BOT_Conversation_V2"
+    .\.venv\Scripts\Activate.ps1
+    python -m uvicorn app.main:app --reload --reload-include ".env" --host 127.0.0.1 --port 8000
+
+Terminal 2:
+
+    cd "D:\ĐÔNG HẢI\DATA\BOT_Conversation_V2"
+    .\.venv\Scripts\Activate.ps1
+    python -m app.workers.product_sync_worker
+
+Worker không in thêm nội dung khi queue trống là bình thường, không phải bị treo.
+
+Không dùng --reload trên production. Production chạy FastAPI và worker thành
+hai service riêng theo DEPLOYMENT.md.
+
+
+12. KIỂM TRA SAU KHI KHỞI ĐỘNG
+
+Mở trình duyệt:
+
+- Health:            http://127.0.0.1:8000/health
+- Đăng nhập:         http://127.0.0.1:8000/admin/login
+- Sản phẩm:          http://127.0.0.1:8000/admin/products
+- Knowledge:         http://127.0.0.1:8000/admin/knowledge
+- Prompt:            http://127.0.0.1:8000/admin/prompts
+- Hội thoại:         http://127.0.0.1:8000/admin/conversations
+- Tài khoản:         http://127.0.0.1:8000/admin/users
+- Biến môi trường:   http://127.0.0.1:8000/admin/environment
+- Swagger API:       http://127.0.0.1:8000/docs
+
+Trang biến môi trường và trang tài khoản chỉ dành cho role admin.
+
+Kiểm tra health bằng PowerShell:
+
+    Invoke-RestMethod http://127.0.0.1:8000/health
+
+
+13. KHỞI TẠO DỮ LIỆU
+
+Sản phẩm:
+
+1. Điền cấu hình Shopify.
+2. Đảm bảo Redis, web và worker đều đang chạy.
+3. Mở /admin/products.
+4. Đồng bộ một SKU để kiểm tra trước.
+5. Khi thành công mới dùng "Đồng bộ tất cả".
+
+Knowledge/RAG:
+
+1. Mở /admin/knowledge.
+2. Chọn nhóm tài liệu có sẵn hoặc tạo nhóm mới.
+3. Upload TXT, Markdown hoặc PDF có lớp văn bản.
+4. Chờ import và embedding hoàn tất.
+
+PostgreSQL là nguồn dữ liệu sản phẩm chính của chatbot. Không cần manifest.json.
+
+
+14. THAY ĐỔI BIẾN MÔI TRƯỜNG
+
+Admin có thể mở /admin/environment để xem và cập nhật .env.
+
+- Khi chạy local bằng start.ps1/--reload, sửa .env sẽ làm web nạp lại cấu hình.
+- Worker là process riêng nên phải khởi động lại worker khi biến của worker đổi.
+- Thay ADMIN_SESSION_SECRET sẽ làm các phiên đăng nhập cũ không còn hợp lệ.
+- Local HTTP dùng ADMIN_COOKIE_SECURE=false.
+- Production HTTPS bắt buộc dùng ADMIN_COOKIE_SECURE=true.
+
+
+15. XỬ LÝ LỖI THƯỜNG GẶP
+
+Lỗi "Thiếu DATABASE_URL":
+
+- Kiểm tra file đúng tên .env và nằm ở thư mục gốc.
+- Kiểm tra DATABASE_URL, database, tài khoản và mật khẩu PostgreSQL.
+
+Lỗi "extension vector is not available":
+
+- Cài pgvector đúng phiên bản PostgreSQL rồi chạy lại CREATE EXTENSION.
+
+Redis connection refused:
+
+    docker start donghai-redis
+    docker exec donghai-redis redis-cli ping
+
+Worker chạy nhưng không có log mới:
+
+- Queue đang trống. Tạo job đồng bộ từ /admin/products để kiểm tra.
+
+Ứng dụng nhận webhook 200 nhưng bot không trả lời:
+
+- Kiểm tra channel có trong CHANNEL_PROVIDER.
+- Kiểm tra token/secret và Human mode của khách.
+- Đặt LOG_LEVEL=DEBUG để xem chi tiết trong lúc chẩn đoán.
+
+AI trả lỗi 429/503:
+
+- Đây thường là quota hoặc model quá tải tạm thời.
+- Chờ và thử lại, hoặc cấu hình AI_FALLBACK_PROVIDER cùng API key tương ứng.
+
+RAG không tìm được dữ liệu:
+
+- Kiểm tra RAG_ENABLED=true.
+- Provider/model/dimension phải khớp dữ liệu đã embedding.
+- Sau khi đổi embedding model/provider cần import lại Knowledge.
+
+Google Sheets lỗi:
+
+- Kiểm tra service account, quyền Editor, spreadsheet ID và sheet Orders.
+- Lần đầu nên tắt GOOGLE_SHEETS_ENABLED để cô lập lỗi cài đặt.
+
+Không đăng nhập được:
+
+- Kiểm tra migration 005_admin_users.sql đã chạy.
+- Kiểm tra tài khoản có trạng thái active.
+- Tạo lại/đổi mật khẩu bằng script create_admin_user.
+
+
+16. LƯU Ý BẢO MẬT VÀ PRODUCTION
+
+- Không đưa .env, API key, access token hoặc service-account JSON lên Git.
+- Không public trực tiếp cổng PostgreSQL 5432, Redis 6379 hoặc Uvicorn 8000.
+- Production phải dùng HTTPS và ADMIN_COOKIE_SECURE=true.
+- Dùng một Uvicorn worker cho source hiện tại.
+- Chạy product sync worker thành service độc lập.
+- Sao lưu PostgreSQL, Redis, prompts, knowledge và data/product_images.
+- Xem toàn bộ quy trình Nginx, HTTPS và systemd trong DEPLOYMENT.md.
+
+
+17. LỆNH KHỞI ĐỘNG NHANH MỖI NGÀY
+
+    cd "D:\ĐÔNG HẢI\DATA\BOT_Conversation_V2"
+    .\.venv\Scripts\Activate.ps1
+    docker start donghai-redis
+    powershell -ExecutionPolicy Bypass -File .\start.ps1
+
+Nếu Redis container đã chạy, lệnh docker start có thể báo container đang chạy;
+điều này không ảnh hưởng hệ thống.
+
+======================================================================
+HOÀN TẤT
+
+Sau khi /health trả về trạng thái hợp lệ và đăng nhập được trang quản trị, tiến
+hành đồng bộ một sản phẩm, upload một tài liệu Knowledge và gửi tin nhắn thử trên
+Web trước khi bật Telegram/Facebook/Google Sheets.

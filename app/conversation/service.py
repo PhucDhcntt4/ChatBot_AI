@@ -110,7 +110,7 @@ class ConversationService:
         self.context_store.append(context, "user", message)
         self.context_store.append(context, "assistant", reply)
         self.context_store.save(context)
-        logger.info(
+        logger.debug(
             "V2 FAST RESPONSE channel=%s session=%s intent=general_chat "
             "lookup=%.3fs total=%.3fs",
             context.channel,
@@ -189,7 +189,7 @@ class ConversationService:
         plan_started = perf_counter()
         plan = self.planner.plan(message, context)
         plan_seconds = perf_counter() - plan_started
-        logger.info(
+        logger.debug(
             "V2 PLAN channel=%s session=%s intent=%s code=%s query=%s "
             "rag=%s rag_query=%s rag_categories=%s "
             "features_include=%s features_exclude=%s "
@@ -213,7 +213,7 @@ class ConversationService:
         self._export_confirmed_order(result, context)
         self.cta.apply(plan, result, context)
         execution_seconds = perf_counter() - execution_started
-        logger.info(
+        logger.debug(
             "V2 EXECUTE session=%s status=%s products=%s media=%s "
             "sources=%s sales_stage=%s order=%s cta=%s time=%.3fs",
             session_id, result.status,
@@ -229,7 +229,7 @@ class ConversationService:
         reply = self.presenter.present(message, plan, result, context)
         presentation_seconds = perf_counter() - presentation_started
         total_seconds = perf_counter() - started
-        logger.info(
+        logger.debug(
             "V2 RESPONSE session=%s status=%s provider=%s model=%s planner=%.3fs executor=%.3fs presenter=%.3fs total=%.3fs",
             session_id, result.status, self.ai.provider_name, self.ai.model,
             plan_seconds, execution_seconds, presentation_seconds, total_seconds,

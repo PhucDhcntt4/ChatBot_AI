@@ -22,4 +22,4 @@ Set-Location -LiteralPath $projectPath
 $Host.UI.RawUI.WindowTitle = "Dong Hai - FastAPI"
 
 Write-Host "Starting FastAPI at http://127.0.0.1:8000" -ForegroundColor Green
-python -m uvicorn app.main:app --reload --port 8000
+python -m uvicorn app.main:app --reload --reload-include ".env" --port 8000

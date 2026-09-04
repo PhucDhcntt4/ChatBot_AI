@@ -9,7 +9,7 @@ reply: Dạ em chào anh/chị! Em có thể hỗ trợ tư vấn sản phẩm, 
 
 [thanks]
 triggers: cảm ơn | cảm ơn em | cám ơn | thank you | thanks
-reply: Dạ, em rất vui vì đã hỗ trợ được anh/chị ạ ❤️
+reply: Dạ, em rất vui vì đã hỗ trợ anh/chị ạ ❤️
 reply: Dạ không có gì ạ. Khi cần hỗ trợ thêm, anh/chị cứ nhắn em nhé ❤️
 
 [goodbye]

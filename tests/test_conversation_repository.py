@@ -107,6 +107,9 @@ class ConversationRepositoryTests(unittest.TestCase):
 
         self.assertEqual(result, rows)
         self.assertEqual(connection.calls[0][1][-1], 500)
+        sql = connection.calls[0][0]
+        self.assertIn("ORDER BY cm.created_at DESC, cm.id DESC", sql)
+        self.assertIn("ORDER BY recent.created_at ASC, recent.id ASC", sql)
 
     def test_invalid_role_is_rejected_before_database_call(self):
         with self.assertRaises(ValueError):

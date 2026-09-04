@@ -1,0 +1,167 @@
+<!doctype html>
+<html lang="vi">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width,initial-scale=1" />
+    <title>Tài khoản · Đông Hải AI</title>
+    <link
+      rel="stylesheet"
+      href="/static/css/admin_sidebar.css?v=20260904-environment2"
+    />
+    <link
+      rel="stylesheet"
+      href="/static/css/admin_pages.css?v=20260904-users1"
+    />
+    <link
+      rel="stylesheet"
+      href="/static/css/user_admin.css?v=20260904-users6"
+    />
+    <link rel="stylesheet" href="/static/css/chatbot.css?v=20260824-1" />
+  </head>
+  <body class="has-admin-sidebar user-admin-page">
+    <aside class="admin-sidebar"></aside>
+    <div class="admin-page">
+      <header class="page-head">
+        <h1>Quản lý tài khoản</h1>
+        <p>
+          Tạo tài khoản nhân viên, phân vai trò, khóa truy cập và đặt lại mật
+          khẩu.
+        </p>
+      </header>
+      <main class="page-content">
+        <section class="card user-card">
+          <div class="user-toolbar">
+            <div>
+              <h2>Danh sách tài khoản</h2>
+              <p class="muted" id="userSummary">Đang tải dữ liệu…</p>
+            </div>
+            <div class="actions">
+              <button class="secondary-button" id="refreshUsers" type="button">
+                Làm mới
+              </button>
+              <button id="openCreateUser" type="button">Tạo tài khoản</button>
+            </div>
+          </div>
+          <div class="notice" id="userNotice" role="status"></div>
+          <div class="table-wrap">
+            <table class="user-table">
+              <thead>
+                <tr>
+                  <th>Tài khoản</th>
+                  <th>Vai trò</th>
+                  <th>Trạng thái</th>
+                  <th>Đăng nhập gần nhất</th>
+                  <th>Thao tác</th>
+                </tr>
+              </thead>
+              <tbody id="userRows"></tbody>
+            </table>
+          </div>
+        </section>
+      </main>
+    </div>
+
+    <dialog id="createUserDialog" class="user-dialog">
+      <form id="createUserForm">
+        <div class="dialog-head">
+          <div>
+            <h2>Tạo tài khoản</h2>
+            <p>Nhân viên sẽ dùng thông tin này để đăng nhập.</p>
+          </div>
+          <button
+            class="icon-button close-dialog"
+            type="button"
+            aria-label="Đóng"
+          >
+            ×
+          </button>
+        </div>
+        <div class="form-grid">
+          <label>Họ tên<input id="createDisplayName" maxlength="150" /></label>
+          <label
+            >Tài khoản<input
+              id="createUsername"
+              minlength="3"
+              maxlength="100"
+              autocomplete="off"
+              required
+          /></label>
+          <label
+            >Vai trò<select id="createRole">
+              <option value="staff">Nhân viên</option>
+              <option value="manager">Quản lý</option>
+              <option value="admin">Quản trị viên</option>
+            </select></label
+          >
+          <label
+            >Mật khẩu<input
+              id="createPassword"
+              type="password"
+              minlength="3"
+              maxlength="500"
+              autocomplete="new-password"
+              required
+          /></label>
+          <label
+            >Nhập lại mật khẩu<input
+              id="createPasswordConfirm"
+              type="password"
+              minlength="3"
+              maxlength="500"
+              autocomplete="new-password"
+              required
+          /></label>
+        </div>
+        <div class="dialog-actions">
+          <button class="secondary-button close-dialog" type="button">
+            Hủy</button
+          ><button id="createUserButton" type="submit">Tạo tài khoản</button>
+        </div>
+      </form>
+    </dialog>
+
+    <dialog id="passwordDialog" class="user-dialog small-dialog">
+      <form id="passwordForm">
+        <div class="dialog-head">
+          <div>
+            <h2>Đặt lại mật khẩu</h2>
+            <p id="passwordTarget"></p>
+          </div>
+          <button
+            class="icon-button close-password"
+            type="button"
+            aria-label="Đóng"
+          >
+            ×
+          </button>
+        </div>
+        <label
+          >Mật khẩu mới<input
+            id="newPassword"
+            type="password"
+            minlength="3"
+            maxlength="500"
+            autocomplete="new-password"
+            required
+        /></label>
+        <label
+          >Nhập lại mật khẩu<input
+            id="newPasswordConfirm"
+            type="password"
+            minlength="3"
+            maxlength="500"
+            autocomplete="new-password"
+            required
+        /></label>
+        <div class="dialog-actions">
+          <button class="secondary-button close-password" type="button">
+            Hủy</button
+          ><button id="savePasswordButton" type="submit">Đổi mật khẩu</button>
+        </div>
+      </form>
+    </dialog>
+
+    <script src="/static/js/admin_base.js?v=20260904-environment2"></script>
+    <script src="/static/js/user_admin.js?v=20260904-users7" defer></script>
+  </body>
+</html>

@@ -2,6 +2,7 @@ import logging
 from logging.handlers import RotatingFileHandler
 import os
 from pathlib import Path
+from typing import Any
 
 
 DEFAULT_LOG_DIR = Path(__file__).resolve().parent.parent / "log"
@@ -15,6 +16,11 @@ NOISY_LIBRARY_LOGGERS = (
     "httpcore",
     "urllib3",
     "PIL",
+    "google_genai",
+    "google_genai.models",
+    "open_clip",
+    "open_clip.factory",
+    "filelock",
 )
 
 
@@ -47,6 +53,14 @@ def setup_logging(
     for logger_name in NOISY_LIBRARY_LOGGERS:
         logging.getLogger(logger_name).setLevel(logging.WARNING)
 
+    # Uvicorn access records every static asset, polling request and webhook.
+    # Keep them available behind an explicit switch, but hide them by default.
+    access_level = (
+        logging.INFO if _boolean_env("LOG_ACCESS_ENABLED") else logging.WARNING
+    )
+    logging.getLogger("uvicorn.access").setLevel(access_level)
+    logging.getLogger("uvicorn.error").setLevel(level)
+
     # Terminal-only is the safe default. File logging must be explicitly
     # enabled with LOG_TO_FILE=true (or enable_file=True in a caller/test).
     file_logging_enabled = (
@@ -56,6 +70,11 @@ def setup_logging(
     )
     if not file_logging_enabled:
         logging.basicConfig(level=level)
+        # Some dependencies log directly to root (not their package logger).
+        # App messages use uvicorn.error, so WARNING here removes dependency
+        # startup noise without hiding application INFO records.
+        logging.getLogger().setLevel(logging.WARNING)
+        logging.getLogger(service_name).setLevel(level)
         return []
 
     directory = Path(log_dir or os.getenv("LOG_DIR") or DEFAULT_LOG_DIR)
@@ -114,7 +133,8 @@ def setup_logging(
         handler._donghai_log_marker = marker  # type: ignore[attr-defined]
         root.addHandler(handler)
 
-    root.setLevel(min(root.level or level, level))
+    root.setLevel(logging.WARNING)
+    logging.getLogger(service_name).setLevel(level)
 
     # Uvicorn owns these loggers and normally disables propagation. Attach the
     # same files directly while retaining its existing console handlers.
@@ -139,3 +159,52 @@ def setup_logging(
         backup_count,
     )
     return handlers
+
+
+def log_bot_response(
+    logger: logging.Logger,
+    *,
+    channel: str,
+    session_id: str,
+    response: Any,
+    total_seconds: float,
+    send_seconds: float | None = None,
+) -> None:
+    """Write one compact, timing-aware line for a completed bot reply."""
+    timing = dict(getattr(response, "timing", None) or {})
+    phase_names = (
+        "planner",
+        "executor",
+        "classification",
+        "recognition",
+        "presenter",
+    )
+    phase_text = " ".join(
+        f"{name}={float(timing[name]):.3f}s"
+        for name in phase_names
+        if timing.get(name) is not None
+    )
+    intent = getattr(response, "intent", None)
+    intent_value = getattr(intent, "value", intent) or "unknown"
+    kind = "image" if "recognition" in timing else "text"
+    send_text = (
+        f" send={send_seconds:.3f}s"
+        if send_seconds is not None
+        else ""
+    )
+    logger.info(
+        "BOT RESPONSE channel=%s session=%s kind=%s status=%s intent=%s "
+        "provider=%s model=%s products=%s media=%s%s%s total=%.3fs",
+        channel,
+        session_id,
+        kind,
+        getattr(response, "status", "unknown"),
+        intent_value,
+        getattr(response, "provider", "unknown"),
+        getattr(response, "model", "unknown"),
+        len(getattr(response, "products", None) or []),
+        len(getattr(response, "media", None) or []),
+        f" {phase_text}" if phase_text else "",
+        send_text,
+        total_seconds,
+    )

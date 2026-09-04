@@ -45,10 +45,20 @@ class SalesStage(str, Enum):
 
 
 class RequestedOrderItem(BaseModel):
-    product_code: str | None = None
+    product_code: str | None = Field(
+        default=None,
+        description=(
+            "Mã của đúng sản phẩm được khách chọn; khi khách chọn nhiều mẫu vừa "
+            "được gợi ý, tạo một RequestedOrderItem riêng cho mỗi mã."
+        ),
+    )
     color: str | None = None
     size: str | None = None
-    quantity: int = Field(ge=1, le=99)
+    quantity: int = Field(
+        ge=1,
+        le=99,
+        description="Số lượng của riêng dòng sản phẩm này, không phải tổng giỏ hàng.",
+    )
 
     @field_validator("product_code")
     @classmethod
@@ -65,7 +75,13 @@ class ConversationPlan(BaseModel):
     requested_size: str | None = None
     requested_quantity: int | None = Field(default=None, ge=1, le=99)
     quantity_explicitly_provided: bool = False
-    requested_items: list[RequestedOrderItem] = Field(default_factory=list)
+    requested_items: list[RequestedOrderItem] = Field(
+        default_factory=list,
+        description=(
+            "Các dòng hàng khách chọn trong cùng một tin nhắn. Nếu khách tham chiếu "
+            "nhiều sản phẩm vừa được gợi ý, phải giữ đủ từng mã trong danh sách này."
+        ),
+    )
     customer_name: str | None = None
     customer_phone: str | None = None
     shipping_address: str | None = None

@@ -192,14 +192,18 @@ class ConversationRepository:
         with database_connection() as connection:
             rows = connection.execute(
                 """
-                SELECT cm.*
-                FROM conversation_messages cm
-                JOIN conversation_sessions cs
-                  ON cs.id = cm.conversation_id
-                WHERE cs.channel = %s
-                  AND cs.session_key = %s
-                ORDER BY cm.created_at ASC, cm.id ASC
-                LIMIT %s
+                SELECT recent.*
+                FROM (
+                    SELECT cm.*
+                    FROM conversation_messages cm
+                    JOIN conversation_sessions cs
+                      ON cs.id = cm.conversation_id
+                    WHERE cs.channel = %s
+                      AND cs.session_key = %s
+                    ORDER BY cm.created_at DESC, cm.id DESC
+                    LIMIT %s
+                ) recent
+                ORDER BY recent.created_at ASC, recent.id ASC
                 """,
                 (
                     str(channel).strip().lower(),

@@ -95,7 +95,7 @@ class KnowledgeSearchService:
             limit=self.top_k,
         )
         if not rows:
-            logger.info(
+            logger.debug(
                 "RAG SEARCH status=not_found provider=%s model=%s "
                 "categories=%s",
                 self.embedding_service.provider_name,
@@ -133,7 +133,7 @@ class KnowledgeSearchService:
                 "similarity": round(float(row["similarity"]), 4),
             })
 
-        logger.info(
+        logger.debug(
             "RAG SEARCH status=found provider=%s model=%s "
             "categories=%s top=%.4f values=%s",
             self.embedding_service.provider_name,

@@ -48,7 +48,7 @@ một nhóm kiến thức để chatbot giải đáp chính sách.
 
 Chưa nên xem là production-ready vì còn thiếu:
 
-- Đăng nhập và phân quyền trang quản trị.
+- Phân quyền endpoint theo role cho trang quản trị (nhiều tài khoản đã có).
 - Rate limit, chống spam và quota theo channel/user.
 - Hệ thống đơn hàng chính thức thay cho Google Sheets.
 - Monitoring, dashboard lỗi, alert và quy trình backup/restore đầy đủ.
@@ -159,7 +159,10 @@ knowledge/
   File nguồn của hệ thống RAG.
 
 prompts/
-  Instruction, promotion, ảnh, CTA và phản hồi nhanh.
+  Instruction nghiệp vụ, dữ liệu promotion, ảnh, CTA và phản hồi nhanh.
+
+app/ai/internal_prompts/
+  Hợp đồng kỹ thuật Planner/Presenter; không hiển thị để chỉnh trên trang Prompt.
 
 tests/
   Kiểm thử planner, executor, order flow, channel, Redis, Sheets và API.
@@ -339,7 +342,11 @@ JSON:
 - conversation_sessions
 - conversation_messages
 
-Database production mới phải chạy cả bốn file theo đúng thứ tự. Không chỉ copy
+005_admin_users.sql:
+
+- admin_users, password hash, trạng thái, role và phiên bản session.
+
+Database production mới phải chạy cả năm file theo đúng thứ tự. Không chỉ copy
 các file .sql vào server; phải thực thi migration trên đúng DATABASE_URL và
 kiểm tra extension pgvector.
 
@@ -348,6 +355,17 @@ kiểm tra extension pgvector.
 =========================
 
 AI_PROVIDER:
+
+- AI_FALLBACK_PROVIDER: provider dự phòng khi provider chính gặp lỗi tạm thời
+  (408, 409, 429, 500, 502, 503 hoặc 504). Để trống nếu không muốn fallback.
+
+Trang /admin/environment cho phép tài khoản role admin xem và cập nhật các biến
+đã có trong file .env. Comment bắt đầu bằng # được dùng làm tiêu đề hoặc ghi chú.
+Token, API key, password và secret được ẩn mặc định, admin có thể bấm Hiện/Ẩn để
+kiểm tra. Khi lưu, trang kích hoạt Uvicorn reload để ứng dụng tự nạp lại toàn bộ
+cấu hình khi chạy local bằng start.ps1; thay đổi secret đăng nhập sẽ thu hồi các
+phiên đăng nhập cũ. Khi chạy bằng service production, cần cập nhật file môi trường
+production và khởi động lại cả app lẫn product sync worker.
 
 - gemini: dùng GEMINI_API_KEY và GEMINI_MODEL.
 - openai: dùng OPENAI_API_KEY và OPENAI_MODEL.
@@ -358,15 +376,18 @@ Model cần hỗ trợ structured output; tính năng ảnh yêu cầu model vis
 Prompt chính:
 
 - prompts/instruction.txt:
-  Vai trò, giọng điệu, nguyên tắc hội thoại, điều hướng nghiệp vụ, dùng dữ liệu,
-  order flow, handoff và cách không bịa thông tin.
+  Prompt nghiệp vụ duy nhất cho vai trò, giọng điệu, quy trình tư vấn, chốt đơn,
+  handoff và format. Không chứa tên intent, field hoặc schema kỹ thuật.
+
+- app/ai/internal_prompts/planner_contract.txt và presenter_contract.txt:
+  Hợp đồng kỹ thuật để ánh xạ instruction thành ConversationPlan và buộc câu trả
+  lời chỉ dùng dữ liệu đã xác minh. Hai file này không xuất hiện trên trang Prompt.
 
 Prompt hỗ trợ:
 
-- promotion_rules.txt: cách hiểu và trình bày khuyến mãi.
+- promotion_rules.txt: dữ liệu chương trình khuyến mãi hiện hành.
 - image_intent.txt: phân biệt ảnh sản phẩm/ảnh đơn hàng/ảnh khác.
 - product_recognition.txt: quy tắc xác minh sản phẩm từ ảnh.
-- product_reply.txt: format phản hồi ảnh sản phẩm.
 - cta_templates.txt: kho CTA theo bước.
 - fast_responses.txt: phản hồi nhanh cho trường hợp đơn giản.
 
@@ -575,8 +596,16 @@ khuyến mãi được áp dụng, promotion note cần giữ tên chương trì
 - Human mode từng khách.
 - Thời gian tạm dừng dùng chung.
 
-Hiện các trang admin chưa có authentication/authorization và tuyệt đối không
-được public trực tiếp ở production.
+/admin/users:
+
+- Chỉ role admin được truy cập.
+- Tạo tài khoản, đổi role, khóa/mở và đặt lại mật khẩu.
+- Ngăn tự khóa và ngăn vô hiệu hóa admin cuối cùng.
+
+Các trang admin đã có authentication bằng bảng admin_users và cookie HttpOnly ký
+số. Password chỉ lưu dạng PBKDF2 hash. Production phải chạy migration 005, tạo
+user, bật ADMIN_AUTH_*, dùng HTTPS và cookie secure. Chỉ trang quản lý tài khoản
+đã giới hạn role admin; các trang nghiệp vụ khác chưa tách quyền manager/staff.
 
 
 18. ENDPOINT CHÍNH
@@ -685,6 +714,7 @@ Sheets/log:
 - GOOGLE_SERVICE_ACCOUNT_FILE
 - LOG_LEVEL
 - LOG_TO_FILE
+- LOG_ACCESS_ENABLED (mặc định false để ẩn access log HTTP lặp lại)
 - LOG_DIR
 - LOG_MAX_BYTES
 - LOG_BACKUP_COUNT
@@ -740,14 +770,9 @@ Log mặc định chỉ ghi terminal nếu LOG_TO_FILE=false. Khi bật file log
 được xoay vòng theo LOG_MAX_BYTES và LOG_BACKUP_COUNT. Production nên gửi log
 JSON/structured đến dịch vụ tập trung thay vì chỉ giữ file local.
 
-Các mốc hiệu năng quan trọng:
-
-- V2 PLAN.
-- V2 EXECUTE.
-- V2 RESPONSE.
-- IMAGE CLASSIFIED.
-- VECTOR PRODUCT CANDIDATES.
-- VECTOR CANDIDATE VERIFIED.
+Ở LOG_LEVEL=INFO, terminal chỉ hiển thị startup, sự kiện trạng thái quan trọng,
+cảnh báo/lỗi và một dòng BOT RESPONSE có timing cho mỗi phản hồi. LOG_LEVEL=DEBUG
+dùng khi cần xem chi tiết Planner, Executor, RAG, vector, webhook và lưu lịch sử.
 - CHANNEL SENT/RESPONSE.
 - RAG SEARCH.
 - Product sync job/worker.
@@ -824,7 +849,7 @@ Checklist bắt buộc:
 
 - Chạy migration 001–004.
 - Tạo database user tối thiểu quyền cần thiết.
-- Bảo vệ admin bằng authentication và role.
+- Mở rộng RBAC cho từng trang nghiệp vụ manager/staff.
 - Không đưa .env/secrets vào Git hoặc Docker image.
 - HTTPS hợp lệ cho Telegram/Facebook.
 - Volume/share storage ảnh giữa worker và web.
@@ -848,7 +873,7 @@ Giới hạn scale hiện tại:
 
 Ưu tiên 1 — An toàn production:
 
-- Authentication/RBAC admin.
+- RBAC endpoint theo role (authentication database nhiều tài khoản đã hoàn tất).
 - Docker Compose hoặc service definitions.
 - Secret manager, HTTPS, backup và monitoring.
 

@@ -203,7 +203,7 @@ class ProductImageConversationService:
         self.context_store.save(context)
 
         total_seconds = perf_counter() - started
-        logger.info(
+        logger.debug(
             "V2 IMAGE status=%s channel=%s images=%s types=%s codes=%s "
             "crops=%s cta=%s provider=%s model=%s classification=%.3fs "
             "recognition=%.3fs presenter=%.3fs total=%.3fs",

@@ -2,7 +2,7 @@
 
 Chatbot tư vấn sản phẩm đa kênh cho Đông Hải. Web, Telegram và Facebook dùng chung một lõi hội thoại để tìm sản phẩm, nhận diện ảnh, trả lời tài liệu RAG, lập đơn nháp và chuyển đơn đã xác nhận sang Google Sheets.
 
-> Trạng thái: sẵn sàng cho môi trường staging. Trước khi chạy production cần hoàn thiện xác thực trang quản trị, bảo mật secret, giám sát, sao lưu và cơ chế triển khai được nêu ở cuối tài liệu.
+> Trạng thái: sẵn sàng cho môi trường staging. Trang quản trị đã có đăng nhập bằng cookie ký số; trước khi chạy production vẫn cần bảo mật secret, giám sát, sao lưu và cơ chế triển khai được nêu ở cuối tài liệu.
 
 Tài liệu kiến trúc và vận hành chi tiết nằm trong [dự án.txt](./dự%20án.txt).
 
@@ -94,6 +94,7 @@ psql "$env:DATABASE_URL" -f db_postgre/001_product_catalog.sql
 psql "$env:DATABASE_URL" -f db_postgre/002_product_image_embeddings.sql
 psql "$env:DATABASE_URL" -f db_postgre/003_customer_care_rag.sql
 psql "$env:DATABASE_URL" -f db_postgre/004_conversation_history.sql
+psql "$env:DATABASE_URL" -f db_postgre/005_admin_users.sql
 ```
 
 Nếu PowerShell chưa có biến môi trường:
@@ -116,6 +117,7 @@ CONVERSATION_HISTORY_LIMIT=12
 
 # AI hội thoại: gemini hoặc openai
 AI_PROVIDER=gemini
+AI_FALLBACK_PROVIDER=openai
 GEMINI_API_KEY=
 GEMINI_MODEL=gemini-3.1-flash-lite
 OPENAI_API_KEY=
@@ -167,15 +169,46 @@ GOOGLE_SERVICE_ACCOUNT_FILE=secrets/google-sheets-service-account.json
 HUMAN_MODE_ENABLED=true
 HUMAN_MODE_TTL_SECONDS=86400
 
+# Đăng nhập trang quản trị
+ADMIN_AUTH_ENABLED=true
+ADMIN_SESSION_SECRET=THAY_CHUOI_NGAU_NHIEN_IT_NHAT_32_KY_TU
+ADMIN_SESSION_TTL_SECONDS=43200
+ADMIN_REMEMBER_TTL_SECONDS=2592000
+ADMIN_COOKIE_SECURE=false
+
 # Log: mặc định chỉ hiện terminal
 LOG_LEVEL=INFO
 LOG_TO_FILE=false
+LOG_ACCESS_ENABLED=false
 LOG_DIR=log
 LOG_MAX_BYTES=10485760
 LOG_BACKUP_COUNT=10
 ```
 
+Ở mức `INFO`, terminal chỉ giữ log khởi động, thay đổi trạng thái quan trọng,
+cảnh báo/lỗi và một dòng `BOT RESPONSE` có thời gian cho mỗi phản hồi. Đặt
+`LOG_LEVEL=DEBUG` khi cần xem Planner, Executor, RAG, vector, webhook và lịch sử.
+`LOG_ACCESS_ENABLED=true` chỉ dùng khi cần xem toàn bộ request HTTP/Uvicorn.
+
 Không commit `.env`, token, API key hoặc file service account lên Git.
+
+Khi chạy local bằng HTTP, dùng `ADMIN_COOKIE_SECURE=false`. Khi production đã có HTTPS, phải đổi thành `ADMIN_COOKIE_SECURE=true`. Có thể tạo session secret ngẫu nhiên trong PowerShell bằng:
+
+```powershell
+[Convert]::ToHexString([Security.Cryptography.RandomNumberGenerator]::GetBytes(32)).ToLower()
+```
+
+Tài khoản và mật khẩu quản trị được lưu trong PostgreSQL, không đặt trong `.env`. Sau khi chạy migration `005_admin_users.sql`, tạo tài khoản đầu tiên bằng lệnh dưới đây; chương trình sẽ yêu cầu nhập mật khẩu hai lần và chỉ lưu password hash:
+
+```powershell
+python -m app.scripts.create_admin_user --username admin --display-name "Quản trị viên"
+```
+
+Đổi mật khẩu và thu hồi toàn bộ phiên cũ của tài khoản:
+
+```powershell
+python -m app.scripts.create_admin_user --username admin --update-password
+```
 
 ### 5. Chạy ứng dụng và worker
 
@@ -204,11 +237,20 @@ Worker đứng yên khi hàng đợi trống là trạng thái bình thường.
 ## Địa chỉ sử dụng
 
 - Trang sản phẩm: <http://127.0.0.1:8000/admin/products>
+- Đăng nhập quản trị: <http://127.0.0.1:8000/admin/login>
 - Knowledge: <http://127.0.0.1:8000/admin/knowledge>
 - Prompt: <http://127.0.0.1:8000/admin/prompts>
 - Hội thoại/Human mode: <http://127.0.0.1:8000/admin/conversations>
+- Tài khoản quản trị: <http://127.0.0.1:8000/admin/users>
+- Biến môi trường (chỉ admin): <http://127.0.0.1:8000/admin/environment>
 - Swagger API: <http://127.0.0.1:8000/docs>
 - Health check: <http://127.0.0.1:8000/health>
+
+Trang biến môi trường chỉ cho role `admin`. Secret được ẩn mặc định nhưng có thể
+Hiện/Ẩn để kiểm tra. Nút lưu ghi file `.env` và kích hoạt Uvicorn reload để nạp
+lại cấu hình khi chạy local bằng `start.ps1`; thay đổi session secret sẽ yêu cầu
+đăng nhập lại. Khi triển khai bằng service production, phải cập nhật file môi
+trường production và khởi động lại cả app lẫn product sync worker.
 
 ## API chatbot
 
@@ -259,8 +301,12 @@ Giới hạn nhập danh sách trực tiếp/Excel là 1.000 SKU mỗi lần. Đ
 - Trang Knowledge nhận TXT, Markdown và PDF có lớp văn bản.
 - Khi đổi provider/model/dimension của RAG, phải import hoặc tạo embedding lại tài liệu.
 - `003_customer_care_rag.sql` hiện dùng vector 768 chiều; đổi dimension cần migration schema tương ứng.
-- Prompt chính là `prompts/instruction.txt`.
-- `prompts/promotion_rules.txt` chứa hướng dẫn tư vấn khuyến mãi.
+- `prompts/instruction.txt` là prompt nghiệp vụ duy nhất: vai trò, cách tư vấn,
+  flow bán hàng và format phản hồi. Người quản trị không cần biết tên intent/tool.
+- Hợp đồng kỹ thuật Planner/Presenter nằm trong `app/ai/internal_prompts/`, không
+  hiển thị trên trang Prompt và chỉ thay đổi khi code/schema thay đổi.
+- `prompts/promotion_rules.txt` là dữ liệu chương trình khuyến mãi, không chứa
+  hướng dẫn trường kỹ thuật.
 - Các prompt ảnh, CTA và phản hồi nhanh được quản lý tại `/admin/prompts`.
 - Hệ thống lưu phiên bản cũ trong `prompts/.versions` trước khi ghi đè.
 - Một số cấu hình tải lúc startup, vì vậy nên khởi động lại app sau khi sửa prompt nếu thay đổi chưa áp dụng ngay.
@@ -306,7 +352,7 @@ Trạng thái gần nhất ngày 28/08/2026: `147` test đã chạy thành công
 - Dùng PostgreSQL/Redis managed hoặc có persistence, password, backup và giám sát.
 - Dùng HTTPS; đặt secret trong secret manager, không đặt trong source hoặc image Docker.
 - Gắn volume dùng chung cho `data/product_images` nếu web và worker chạy ở máy/container khác nhau.
-- Bảo vệ toàn bộ `/admin/*` bằng đăng nhập và phân quyền trước khi public.
+- Chạy migration `005_admin_users.sql`, tạo ít nhất một user quản trị, bật `ADMIN_AUTH_ENABLED=true`, đặt session secret riêng và `ADMIN_COOKIE_SECURE=true` trước khi public. User được lưu trong PostgreSQL; chỉ role `admin` được quản lý tài khoản. Các trang nghiệp vụ còn lại chưa giới hạn riêng giữa `manager` và `staff`.
 - Thêm rate limit, request size limit, timeout, retry có kiểm soát và cảnh báo lỗi AI/API.
 - Hiện hàng đợi sự kiện Facebook theo người dùng nằm trong bộ nhớ process; để scale nhiều web worker/replica cần chuyển phần này sang Redis hoặc bảo đảm sticky routing. Trước khi làm việc đó nên chạy một web worker.
 - Job upload Knowledge hiện dùng background task trong FastAPI; production nên tách sang worker bền vững.
@@ -323,6 +369,7 @@ app/
   database/              PostgreSQL repositories
   knowledge/             RAG embedding và retrieval
   product_recognition/   CLIP, vector search, AI verification
+  ai/internal_prompts/   Hợp đồng kỹ thuật Planner/Presenter, không chỉnh nghiệp vụ
   routes/                 API và trang quản trị
   services/               Shopify, Sheets, Redis queue, history
   workers/                Product sync worker
@@ -331,7 +378,7 @@ app/
 db_postgre/               4 migration SQL
 data/product_images/      Ảnh catalog local
 knowledge/                Tài liệu nguồn RAG
-prompts/                  Prompt có thể quản trị
+prompts/                  Instruction nghiệp vụ và cấu hình nội dung có thể quản trị
 tests/                    Unit/integration-style tests
 ```
 

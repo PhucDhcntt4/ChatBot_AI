@@ -125,7 +125,7 @@ class ProductImageHandler:
                 reverse=True,
             )
 
-        logger.info(
+        logger.debug(
             "VECTOR RETRIEVAL classified_type=%s global_images=%s "
             "type_images=%s merged_images=%s",
             product_type,
@@ -150,7 +150,7 @@ class ProductImageHandler:
         ):
             verification_candidates.append(type_candidate)
 
-        logger.info(
+        logger.debug(
             "VECTOR PRODUCT CANDIDATES classified_type=%s status=%s "
             "top=%.4f margin=%.4f values=%s",
             product_type,
@@ -185,7 +185,7 @@ class ProductImageHandler:
             item["product_code"]
             for item in candidates_for_verification
         ]
-        logger.info(
+        logger.debug(
             "VECTOR VERIFICATION MODE mode=%s codes=%s "
             "references_per_product=%s",
             "top_only" if strong_vector_match else "shortlist",
@@ -200,7 +200,7 @@ class ProductImageHandler:
             original_image_bytes=original_image_bytes,
             original_mime_type=original_mime_type,
         )
-        logger.info(
+        logger.debug(
             "VECTOR CANDIDATE VERIFIED exact=%s code=%s confidence=%.3f "
             "reason=%s",
             verification.exact_match,
@@ -257,7 +257,7 @@ class ProductImageHandler:
                         f"{top_verification.matched_reference}"
                     )
                 )
-                logger.info(
+                logger.debug(
                     "VECTOR TOP RECHECK code=%s exact=%s confidence=%.3f "
                     "details=%s",
                     top_code,
@@ -278,7 +278,7 @@ class ProductImageHandler:
                         f"{top_recheck_details}"
                     )
                 elif top_verification.exact_match:
-                    logger.info(
+                    logger.debug(
                         "VECTOR TOP RECHECK NOT OVERRIDDEN keep=%s "
                         "selected_confidence=%.3f top=%s "
                         "top_confidence=%.3f",
@@ -359,7 +359,7 @@ class ProductImageHandler:
             key=lambda item: item.confidence,
             reverse=True,
         )[:3]
-        logger.info(
+        logger.debug(
             "PRODUCT CANDIDATES values=%s",
             [
                 {
@@ -377,7 +377,7 @@ class ProductImageHandler:
                 mime_type=mime_type,
                 product_code=candidate.product_code,
             )
-            logger.info(
+            logger.debug(
                 "PRODUCT MATCH VERIFIED code=%s exact=%s confidence=%.3f "
                 "matched_reference=%s mismatches=%s",
                 candidate.product_code,

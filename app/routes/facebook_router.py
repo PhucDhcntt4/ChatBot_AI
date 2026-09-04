@@ -16,6 +16,7 @@ from app.config import (
     FACEBOOK_CHAT_CHANNEL,
     FACEBOOK_VERIFY_TOKEN,
 )
+from app.logging_config import log_bot_response
 
 
 router = APIRouter(tags=["Facebook"])
@@ -75,7 +76,7 @@ def _handle_message_echo(
     )
     if not message.get("is_echo") and not is_page_outbound:
         return False
-    logger.info(
+    logger.debug(
         "FACEBOOK OUTBOUND EVENT sender=%s recipient=%s is_echo=%s "
         "metadata=%s app_id=%s mid=%s",
         sender_id,
@@ -86,7 +87,7 @@ def _handle_message_echo(
         message.get("mid"),
     )
     if str(message.get("metadata") or "").strip() == AI_MESSAGE_METADATA:
-        logger.info("FACEBOOK BOT ECHO IGNORED mid=%s", message.get("mid"))
+        logger.debug("FACEBOOK BOT ECHO IGNORED mid=%s", message.get("mid"))
         return True
     if not customer_id:
         logger.warning("FACEBOOK STAFF ECHO missing recipient mid=%s", message.get("mid"))
@@ -110,6 +111,7 @@ def _handle_message_echo(
 
 
 def _process_event(app, event_payload: dict[str, Any]) -> None:
+    started = time.perf_counter()
     provider = getattr(app.state, "channel_providers", {}).get(
         FACEBOOK_CHAT_CHANNEL
     )
@@ -148,6 +150,7 @@ def _process_event(app, event_payload: dict[str, Any]) -> None:
         history_service = getattr(
             app.state, "conversation_history_service", None
         )
+        send_started = time.perf_counter()
         try:
             provider.send_response(recipient_id, response)
         except Exception as error:
@@ -161,11 +164,14 @@ def _process_event(app, event_payload: dict[str, Any]) -> None:
         else:
             if history_service is not None:
                 history_service.mark_sent(history_message_id)
-        logger.info(
-            "CHANNEL RESPONSE provider=facebook session=%s status=%s media=%s",
-            recipient_id,
-            response.status,
-            len(response.media),
+        send_seconds = time.perf_counter() - send_started
+        log_bot_response(
+            logger,
+            channel=FACEBOOK_CHAT_CHANNEL,
+            session_id=recipient_id,
+            response=response,
+            send_seconds=send_seconds,
+            total_seconds=time.perf_counter() - started,
         )
     except Exception:
         logger.exception(
@@ -200,7 +206,7 @@ def _drain_recipient_queue(app, recipient_id: str) -> None:
             queue.clear()
 
         for _, _, event_payload in ordered:
-            logger.info(
+            logger.debug(
                 "FACEBOOK EVENT PROCESS recipient=%s mid=%s timestamp=%s",
                 recipient_id,
                 (event_payload.get("message") or {}).get("mid"),
@@ -233,7 +239,7 @@ def _enqueue_event(app, event_payload: dict[str, Any]) -> str | None:
         if recipient_id not in _active_recipients:
             _active_recipients.add(recipient_id)
             should_start = True
-    logger.info(
+    logger.debug(
         "FACEBOOK EVENT QUEUED recipient=%s mid=%s timestamp=%s pending=%s",
         recipient_id,
         message_id,
@@ -281,7 +287,7 @@ async def facebook_webhook(request: Request, background_tasks: BackgroundTasks):
         for event in events:
             if isinstance(event, dict):
                 message = event.get("message")
-                logger.info(
+                logger.debug(
                     "FACEBOOK WEBHOOK EVENT page=%s container=%s keys=%s "
                     "sender=%s recipient=%s message_keys=%s",
                     page_id,

@@ -1,4 +1,5 @@
 import logging
+from time import perf_counter
 from collections import deque
 from threading import Lock
 from typing import Any
@@ -10,6 +11,7 @@ from app.config import (
     TELEGRAM_CHAT_CHANNEL,
     TELEGRAM_WEBHOOK_SECRET,
 )
+from app.logging_config import log_bot_response
 
 
 router = APIRouter(prefix="/api/telegram", tags=["Telegram"])
@@ -33,6 +35,7 @@ def _remember_update(update_id: Any) -> bool:
 
 
 def _process_payload(app, payload: dict[str, Any]) -> None:
+    started = perf_counter()
     providers = getattr(app.state, "channel_providers", {})
     provider = providers.get(TELEGRAM_CHAT_CHANNEL)
     dispatcher = getattr(app.state, "channel_dispatcher", None)
@@ -66,6 +69,7 @@ def _process_payload(app, payload: dict[str, Any]) -> None:
         if response is None:
             return
         history_service = getattr(app.state, "conversation_history_service", None)
+        send_started = perf_counter()
         try:
             provider.send_response(recipient_id, response)
         except Exception as error:
@@ -79,12 +83,14 @@ def _process_payload(app, payload: dict[str, Any]) -> None:
         else:
             if history_service is not None:
                 history_service.mark_sent(history_message_id)
-        logger.info(
-            "CHANNEL RESPONSE provider=%s session=%s status=%s media=%s",
-            event.channel,
-            event.user_id,
-            response.status,
-            len(response.media),
+        send_seconds = perf_counter() - send_started
+        log_bot_response(
+            logger,
+            channel=event.channel,
+            session_id=event.user_id,
+            response=response,
+            send_seconds=send_seconds,
+            total_seconds=perf_counter() - started,
         )
     except Exception:
         logger.exception("CHANNEL ERROR provider=telegram chat_id=%s", chat_id)

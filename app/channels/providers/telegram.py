@@ -60,7 +60,7 @@ class TelegramChannelProvider:
                 f"Telegram {method} thất bại: "
                 f"{result.get('description', response.status_code)}"
             )
-        logger.info(
+        logger.debug(
             "CHANNEL SENT provider=telegram method=%s time=%.3fs",
             method,
             time.perf_counter() - started,

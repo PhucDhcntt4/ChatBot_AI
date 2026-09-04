@@ -186,7 +186,28 @@ class ConversationExecutor:
         )
 
     def _product_info(self, message, plan, context) -> ExecutionResult:
-        product = self.products.public_info(plan.reference_product_code or "")
+        requested_codes = list(dict.fromkeys(
+            item.product_code
+            for item in plan.requested_items
+            if item.product_code
+        ))
+        if plan.reference_product_code and plan.reference_product_code not in requested_codes:
+            requested_codes.insert(0, plan.reference_product_code)
+        if not requested_codes:
+            requested_codes = [plan.reference_product_code or ""]
+        products = [
+            product
+            for code in requested_codes
+            if (product := self.products.public_info(code)) is not None
+        ]
+        product = next(
+            (
+                item
+                for item in products
+                if item.get("product_code") == plan.reference_product_code
+            ),
+            products[0] if products else None,
+        )
         # Only attach an album when introducing a new product. Follow-up
         # questions about the current product must not resend the same images.
         is_new_product = bool(
@@ -221,10 +242,10 @@ class ConversationExecutor:
                 knowledge_context = str(knowledge_result.get("content") or "")
                 sources = list(knowledge_result.get("sources") or [])
         return ExecutionResult(
-            success=product is not None,
-            status="product_found" if product else "product_context_missing",
+            success=bool(products),
+            status="product_found" if products else "product_context_missing",
             intent=plan.intent,
-            products=[product] if product else [],
+            products=products,
             media=[media] if media else [],
             knowledge_context=knowledge_context,
             sources=sources,

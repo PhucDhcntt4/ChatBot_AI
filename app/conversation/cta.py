@@ -181,6 +181,20 @@ class CTAService:
             and plan.promotion_eligible is True
         ):
             return CTAType.APPLY_PROMOTION
+        order = result.facts.get("order_draft")
+        order_is_ready = bool(
+            isinstance(order, dict)
+            and order.get("items")
+            and not order.get("pending_items")
+            and not result.facts.get("missing_product_fields")
+            and not result.facts.get("product_validation_errors")
+            and not result.facts.get("missing_contact_fields")
+        )
+        # The verified order data is more reliable than a stale planner CTA
+        # or an out-of-date sales_stage. Once every cart and contact field is
+        # complete, the only valid next action is reviewing the order.
+        if order_is_ready:
+            return CTAType.CONFIRM_ORDER
         if context.sales_stage == SalesStage.COLLECTING_PRODUCT:
             missing = set(result.facts.get("missing_product_fields") or [])
             if "product_code" in missing:

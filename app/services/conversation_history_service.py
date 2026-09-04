@@ -72,7 +72,7 @@ class ConversationHistoryService:
                 delivery_status="received",
                 metadata=metadata,
             )
-            logger.info(
+            logger.debug(
                 "CONVERSATION HISTORY SAVED role=user channel=%s "
                 "session=%s stored=%s",
                 channel,
@@ -144,7 +144,7 @@ class ConversationHistoryService:
                     **(metadata or {}),
                 },
             )
-            logger.info(
+            logger.debug(
                 "CONVERSATION HISTORY SAVED role=assistant channel=%s "
                 "session=%s stored=%s",
                 channel,

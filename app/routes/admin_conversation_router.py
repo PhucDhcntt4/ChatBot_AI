@@ -128,6 +128,10 @@ def session_detail(channel: str, session_id: str, request: Request):
             live_item.get("ttl_seconds") if live_item is not None else None
         ),
     }
+    total_message_count = max(
+        int((stored_item or {}).get("message_count") or 0),
+        int((live_item or {}).get("message_count") or 0),
+    )
     stored_messages = (
         history_service.list_messages(
             channel=channel,
@@ -147,7 +151,7 @@ def session_detail(channel: str, session_id: str, request: Request):
             }
             for message in stored_messages
         ]
-        item["message_count"] = len(stored_messages)
+        item["message_count"] = max(total_message_count, len(stored_messages))
         item["last_message"] = stored_messages[-1].get("content") or ""
     context.setdefault("history", [])
     item["context"] = context

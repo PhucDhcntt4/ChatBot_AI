@@ -280,19 +280,55 @@ class ConversationPresenter:
         cta = (result.cta_text or "").strip()
         normalized_reply = reply.strip()
         if cta:
+            initial_reply = re.sub(r"\s+", " ", normalized_reply).casefold()
+            initial_cta = re.sub(r"\s+", " ", cta).casefold()
+            reply_without_greeting = re.sub(
+                r"^dạ[, ]+",
+                "",
+                initial_reply,
+                flags=re.IGNORECASE,
+            )
+            if reply_without_greeting == initial_cta:
+                return normalized_reply
             # The presenter model is instructed not to invent a CTA, but an
             # occasional response still appends a request such as "Anh/chị
             # cho em xin...".  Remove that trailing generated request and let
             # the deterministic CTA selected from the order state be the only
             # call to action shown to the customer.
-            normalized_reply = re.sub(
-                r"(?:\n+|\s{2,}|(?<=[.!?])\s+)"
-                r"(?:anh/chị\s+cho\s+em|em\s+xin|mẫu\s+này\s+anh/chị)"
-                r"[^\n]*$",
-                "",
-                normalized_reply,
-                flags=re.IGNORECASE,
-            ).rstrip()
+            while normalized_reply:
+                previous_reply = normalized_reply
+                normalized_reply = re.sub(
+                    r"(?:\n+|\s{2,}|(?<=[.!?])\s+)"
+                    r"(?:anh/chị\s+cho\s+em|em\s+xin|mẫu\s+này\s+anh/chị)"
+                    r"[^\n]*$",
+                    "",
+                    normalized_reply,
+                    flags=re.IGNORECASE,
+                ).rstrip()
+                paragraphs = re.split(r"\n\s*\n", normalized_reply)
+                trailing = re.sub(r"\s+", " ", paragraphs[-1]).strip()
+                generated_cta = bool(
+                    trailing.endswith("?")
+                    or (
+                        re.match(
+                            r"^(?:dạ[, ]*)?(?:anh/chị|em\s+xin|mẫu\s+này|"
+                            r"trong\s+(?:các|những)|nếu\s+anh/chị)\b",
+                            trailing,
+                            flags=re.IGNORECASE,
+                        )
+                        and re.search(
+                            r"(?:cho\s+em|gửi\s+em|xin|muốn|cần|chọn|ưng|"
+                            r"quan\s+tâm|xem|kiểm\s+tra|xác\s+nhận|vui\s+lòng)",
+                            trailing,
+                            flags=re.IGNORECASE,
+                        )
+                    )
+                )
+                if generated_cta:
+                    paragraphs.pop()
+                    normalized_reply = "\n\n".join(paragraphs).strip()
+                if normalized_reply == previous_reply:
+                    break
         comparable_reply = re.sub(r"\s+", " ", normalized_reply).casefold()
         comparable_cta = re.sub(r"\s+", " ", cta).casefold()
         if (
@@ -307,4 +343,4 @@ class ConversationPresenter:
             return normalized_reply
         if not cta or comparable_cta in comparable_reply:
             return normalized_reply
-        return f"{normalized_reply}\n\n{cta}"
+        return f"{normalized_reply}\n\n{cta}" if normalized_reply else cta

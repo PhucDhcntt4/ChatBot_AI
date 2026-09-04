@@ -6,7 +6,7 @@
     <title>Knowledge · Đông Hải AI</title>
     <link
       rel="stylesheet"
-      href="/static/css/admin_sidebar.css?v=20260815-redesign2"
+      href="/static/css/admin_sidebar.css?v=20260904-environment2"
     />
     <link
       rel="stylesheet"
@@ -105,21 +105,29 @@
                 </button>
               </div>
               <label for="knowledgeCategory">Nhóm tài liệu</label>
-              <input
-                id="knowledgeCategory"
-                list="categoryOptions"
-                value="customer_care"
-                pattern="[a-z0-9_-]+"
-                required
-              />
-              <datalist id="categoryOptions">
-                <option value="customer_care"></option>
-                <option value="product_info"></option>
-                <option value="shipping"></option>
-                <option value="return_policy"></option>
-                <option value="promotion"></option>
-                <option value="faq"></option>
-              </datalist>
+              <select id="knowledgeCategory" required>
+                <option value="customer_care">customer_care</option>
+                <option value="product_info">product_info</option>
+                <option value="shipping">shipping</option>
+                <option value="return_policy">return_policy</option>
+                <option value="promotion">promotion</option>
+                <option value="faq">faq</option>
+                <option value="__new__">+ Tạo nhóm mới</option>
+              </select>
+              <div class="new-category-field" id="newCategoryField" hidden>
+                <label for="newKnowledgeCategory">Tên nhóm mới</label>
+                <input
+                  id="newKnowledgeCategory"
+                  type="text"
+                  maxlength="100"
+                  pattern="[A-Za-z0-9 _-]+"
+                  placeholder="Ví dụ: payment_policy"
+                  autocomplete="off"
+                />
+                <p class="field-hint">
+                  Dùng chữ không dấu, số, dấu gạch ngang hoặc gạch dưới.
+                </p>
+              </div>
               <button
                 id="uploadButton"
                 type="submit"
@@ -227,9 +235,9 @@
       </div>
     </div>
 
-    <script src="/static/js/admin_base.js?v=20260824-1"></script>
+    <script src="/static/js/admin_base.js?v=20260904-environment2"></script>
     <script
-      src="/static/js/knowledge_admin.js?v=20260817-redesign4"
+      src="/static/js/knowledge_admin.js?v=20260903-category-select1"
       defer
     ></script>
   </body>

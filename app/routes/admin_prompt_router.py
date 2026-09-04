@@ -16,10 +16,9 @@ PROMPT_FILES = {
     "instruction.txt": "Instruction hội thoại",
     "image_intent.txt": "Phân loại ảnh",
     "product_recognition.txt": "Xác minh sản phẩm",
-    "product_reply.txt": "Trả lời nhận diện ảnh",
     "cta_templates.txt": "Câu CTA",
     "fast_responses.txt": "Câu trả lời nhanh",
-    "promotion_rules.txt": "Chương trình khuyến mãi",
+    "promotion_rules.txt": "Dữ liệu khuyến mãi",
 }
 
 
@@ -51,8 +50,6 @@ def _apply_runtime(request: Request, name: str, content: str) -> None:
         image_service.intent_service.prompt = content
     elif name == "product_recognition.txt" and image_service:
         image_service.handler.recognition.prompt = content
-    elif name == "product_reply.txt" and image_service:
-        image_service.handler.reply_prompt = content
     elif name == "cta_templates.txt":
         parsed = parse_cta_templates(content, name)
         CTA_TEMPLATES.clear()

@@ -36,11 +36,56 @@ const ICON = {
 };
 
 let documentsCache = [];
+const DEFAULT_CATEGORIES = [
+  "customer_care",
+  "product_info",
+  "shipping",
+  "return_policy",
+  "promotion",
+  "faq",
+];
+const NEW_CATEGORY_VALUE = "__new__";
 
-async function loadDocuments() {
+function toggleNewCategory(focusInput = false) {
+  const isNew = $("knowledgeCategory").value === NEW_CATEGORY_VALUE;
+  $("newCategoryField").hidden = !isNew;
+  $("newKnowledgeCategory").required = isNew;
+  if (isNew && focusInput) $("newKnowledgeCategory").focus();
+}
+
+function renderCategoryOptions(documents, preferredCategory = null) {
+  const select = $("knowledgeCategory");
+  const currentCategory = preferredCategory || select.value || "customer_care";
+  const savedCategories = (documents || [])
+    .map((item) => String(item.category || "").trim())
+    .filter(Boolean)
+    .sort((left, right) => left.localeCompare(right, "vi"));
+  const categories = [...new Set([...DEFAULT_CATEGORIES, ...savedCategories])];
+
+  select.innerHTML = `${categories
+    .map((category) => `<option value="${html(category)}">${html(category)}</option>`)
+    .join("")}<option value="${NEW_CATEGORY_VALUE}">+ Tạo nhóm mới</option>`;
+  select.value = categories.includes(currentCategory)
+    ? currentCategory
+    : "customer_care";
+  toggleNewCategory();
+}
+
+function selectedCategory() {
+  if ($("knowledgeCategory").value !== NEW_CATEGORY_VALUE) {
+    return $("knowledgeCategory").value;
+  }
+  return $("newKnowledgeCategory")
+    .value.trim()
+    .toLowerCase()
+    .replace(/\s+/g, "_");
+}
+
+async function loadDocuments(preferredCategory = null) {
   try {
     const data = await json(await fetch("/admin/knowledge/api/documents"));
     documentsCache = data.documents;
+    renderCategoryOptions(data.documents, preferredCategory);
     $("documentCount").textContent = `${data.total} tài liệu`;
     $("documentRows").innerHTML = data.documents.length
       ? data.documents
@@ -202,7 +247,11 @@ async function watchJob(id) {
     );
   else {
     $("uploadButton").disabled = false;
-    if (job.status === "completed") loadDocuments();
+    if (job.status === "completed") {
+      clearSelectedFile();
+      $("newKnowledgeCategory").value = "";
+      loadDocuments(job.category);
+    }
   }
 }
 
@@ -222,11 +271,20 @@ function setSelectedFile(file) {
   }
 }
 
+function clearSelectedFile() {
+  $("knowledgeFile").value = "";
+  $("fileChipName").textContent = "";
+  $("fileChipSize").textContent = "";
+  $("fileChip").classList.remove("show");
+}
+
 $("knowledgeFile").addEventListener("change", () => setSelectedFile());
+$("knowledgeCategory").addEventListener("change", () =>
+  toggleNewCategory(true),
+);
 $("clearFile").addEventListener("click", (event) => {
   event.preventDefault();
-  $("knowledgeFile").value = "";
-  setSelectedFile();
+  clearSelectedFile();
 });
 ["dragenter", "dragover"].forEach((evt) =>
   $("dropZone").addEventListener(evt, (event) => {
@@ -249,9 +307,18 @@ $("uploadForm").onsubmit = async (event) => {
   event.preventDefault();
   const file = $("knowledgeFile").files[0];
   if (!file) return;
+  const category = selectedCategory();
+  if (!/^[a-z0-9][a-z0-9_-]{0,99}$/.test(category)) {
+    showNotice(
+      "Tên nhóm chỉ dùng chữ không dấu, số, dấu gạch ngang hoặc gạch dưới.",
+      "error",
+    );
+    $("newKnowledgeCategory").focus();
+    return;
+  }
   const body = new FormData();
   body.append("file", file);
-  body.append("category", $("knowledgeCategory").value.trim());
+  body.append("category", category);
   $("uploadButton").disabled = true;
   showNotice("Đang tải tài liệu...", "progress");
   try {

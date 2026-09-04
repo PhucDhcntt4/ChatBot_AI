@@ -9,6 +9,8 @@ from app.ai.base import AIProvider
 from app.config import (
     CONVERSATION_INSTRUCTION_PATH,
     GEMINI_MODEL,
+    PLANNER_CONTRACT_PATH,
+    PRESENTER_CONTRACT_PATH,
     PROMOTION_RULES_PATH,
 )
 from app.conversation.models import (
@@ -32,6 +34,8 @@ class GeminiProvider(AIProvider):
             encoding="utf-8"
         )
         self.promotion_rules = PROMOTION_RULES_PATH.read_text(encoding="utf-8")
+        self.planner_contract = PLANNER_CONTRACT_PATH.read_text(encoding="utf-8")
+        self.presenter_contract = PRESENTER_CONTRACT_PATH.read_text(encoding="utf-8")
 
     def create_plan(
         self, message: str, context: ConversationContext
@@ -74,15 +78,17 @@ class GeminiProvider(AIProvider):
             config=types.GenerateContentConfig(
                 system_instruction=(
                     self.instruction_prompt
-                    + "\n\n# CHẾ ĐỘ HIỆN TẠI: ĐIỀU PHỐI TOOL\n"
-                    + "Chỉ phân tích yêu cầu và trả ConversationPlan đúng schema. "
-                    + "Không viết câu trả lời cho khách."
                     + "\n\n"
                     + self.promotion_rules
+                    + "\n\n"
+                    + self.planner_contract
                 ),
                 response_mime_type="application/json",
                 response_schema=ConversationPlan,
                 temperature=0,
+                automatic_function_calling=types.AutomaticFunctionCallingConfig(
+                    disable=True
+                ),
             ),
         )
         return ConversationPlan.model_validate_json(response.text or "{}")
@@ -112,14 +118,15 @@ class GeminiProvider(AIProvider):
             config=types.GenerateContentConfig(
                 system_instruction=(
                     self.instruction_prompt
-                    + "\n\n# CHẾ ĐỘ HIỆN TẠI: TRẢ LỜI KHÁCH\n"
-                    + "Chỉ viết câu trả lời cuối dựa trên verified_result. "
-                    + "Không gọi tool, không tự tạo dữ liệu và không trả JSON. "
-                    + "CTA chỉ dùng verified_result.cta_text và chỉ xuất hiện một lần."
                     + "\n\n"
                     + self.promotion_rules
+                    + "\n\n"
+                    + self.presenter_contract
                 ),
                 temperature=0.2,
+                automatic_function_calling=types.AutomaticFunctionCallingConfig(
+                    disable=True
+                ),
             ),
         )
         return (response.text or "").strip()
@@ -144,6 +151,9 @@ class GeminiProvider(AIProvider):
                 response_mime_type="application/json",
                 response_schema=response_model,
                 temperature=0,
+                automatic_function_calling=types.AutomaticFunctionCallingConfig(
+                    disable=True
+                ),
             ),
         )
         return response_model.model_validate_json(response.text or "{}")

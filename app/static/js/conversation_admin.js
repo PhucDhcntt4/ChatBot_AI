@@ -36,6 +36,20 @@ function escapeHtml(value) {
   node.textContent = value == null ? "" : String(value);
   return node.innerHTML;
 }
+function messageTimeLabel(value) {
+  if (!value) return "";
+  const date = new Date(value);
+  if (Number.isNaN(date.getTime())) return "";
+  return new Intl.DateTimeFormat("vi-VN", {
+    timeZone: "Asia/Ho_Chi_Minh",
+    day: "2-digit",
+    month: "2-digit",
+    year: "numeric",
+    hour: "2-digit",
+    minute: "2-digit",
+    hourCycle: "h23",
+  }).format(date);
+}
 function ttlLabel(seconds) {
   if (seconds == null) return "Không hết hạn";
   if (seconds < 60) return `${seconds} giây`;
@@ -227,11 +241,17 @@ async function openSession(channel, sessionId) {
   $("conversationBadges").innerHTML =
     `<span class="pill">${escapeHtml(stageLabel(item.sales_stage))}</span><span class="pill">${item.message_count} tin nhắn</span>${item.latest_product_code ? `<span class="pill">${escapeHtml(item.latest_product_code)}</span>` : ""}<span class="pill ${activeHumanMode ? "human-active" : "bot-active"}" id="humanModeBadge">${activeHumanMode ? "Nhân viên đang xử lý" : "Bot đang trả lời"}</span>`;
   const history = item.context.history || [];
-  $("conversationHistory").innerHTML = history.length
+  const historyElement = $("conversationHistory");
+  historyElement.innerHTML = history.length
     ? history
         .map(
-          (message) =>
-            `<div class="history-message ${message.role}"><span>${message.role === "user" ? "Khách hàng" : "Trợ lý"}</span><p>${escapeHtml(message.text)}</p></div>`,
+          (message) => {
+            const timeLabel = messageTimeLabel(message.created_at);
+            const timeElement = timeLabel
+              ? `<time datetime="${escapeHtml(message.created_at)}">${escapeHtml(timeLabel)}</time>`
+              : "";
+            return `<div class="history-message ${message.role}"><div class="history-message-header"><span>${message.role === "user" ? "Khách hàng" : "Trợ lý"}</span>${timeElement}</div><p>${escapeHtml(message.text)}</p></div>`;
+          },
         )
         .join("")
     : '<div class="empty-history">Hội thoại chưa có tin nhắn.</div>';
@@ -244,6 +264,13 @@ async function openSession(channel, sessionId) {
   renderHumanModeButton();
   $("conversationModal").hidden = false;
   document.body.style.overflow = "hidden";
+  const historyScroller = historyElement.closest(".modal-body") || historyElement;
+  requestAnimationFrame(() => {
+    historyScroller.scrollTop = historyScroller.scrollHeight;
+    requestAnimationFrame(() => {
+      historyScroller.scrollTop = historyScroller.scrollHeight;
+    });
+  });
 }
 function renderHumanModeButton() {
   const button = $("toggleHumanMode");

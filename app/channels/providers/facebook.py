@@ -73,7 +73,7 @@ class FacebookChannelProvider:
             raise RuntimeError(
                 f"Facebook Send API thất bại: {detail or response.status_code}"
             )
-        logger.info(
+        logger.debug(
             "CHANNEL SENT provider=facebook time=%.3fs",
             time.perf_counter() - started,
         )

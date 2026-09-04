@@ -1632,6 +1632,183 @@ class ConversationTests(unittest.TestCase):
         self.assertNotIn("họ tên", result.cta_text)
         self.assertNotIn("số điện thoại", result.cta_text)
 
+    def test_complete_multi_item_order_forces_confirmation_cta(self):
+        context = ConversationContext(
+            session_id="complete-multi-order",
+            channel="facebook",
+            # Simulate stale state left by an earlier multi-product turn.
+            sales_stage=SalesStage.COLLECTING_PRODUCT,
+        )
+        plan = ConversationPlan(
+            intent=ConversationIntent.PRODUCT_INFORMATION,
+            suggested_cta_type=CTAType.CHOOSE_COLOR,
+            suggested_cta_index=1,
+        )
+        result = ExecutionResult(
+            success=True,
+            status="order_flow_updated",
+            intent=plan.intent,
+            facts={
+                "order_draft": {
+                    "items": [
+                        {
+                            "product_code": "GHLL8",
+                            "color": "Đen",
+                            "size": "37",
+                            "quantity": 1,
+                        },
+                        {
+                            "product_code": "S32F8",
+                            "color": "Xanh",
+                            "size": "37",
+                            "quantity": 1,
+                        },
+                    ],
+                    "pending_items": [],
+                },
+                "missing_product_fields": [],
+                "product_validation_errors": [],
+                "missing_contact_fields": [],
+            },
+        )
+
+        CTAService().apply(plan, result, context)
+
+        self.assertEqual(result.cta_type, CTAType.CONFIRM_ORDER)
+        self.assertNotIn("màu", (result.cta_text or "").casefold())
+
+    def test_contact_turn_removes_empty_pending_duplicate_from_completed_cart(self):
+        first_product = {
+            **PRODUCT,
+            "product_code": "GHLL8",
+            "product_name": "Giày Cao Gót Slingback Zucia",
+            "colors": ["Đen", "Xám"],
+            "available_sizes": ["35", "36", "37", "38", "39"],
+            "prices": [750_000],
+            "variant_prices": [],
+        }
+        first_item = {
+            "product_code": "GHLL8",
+            "product_name": first_product["product_name"],
+            "color": "Đen",
+            "size": "37",
+            "quantity": 1,
+            "unit_price": 750_000,
+            "subtotal": 750_000,
+        }
+        second_item = {
+            "product_code": "S32F8",
+            "product_name": "Giày Sandal Cao Gót Đông Hải",
+            "color": "Xanh",
+            "size": "37",
+            "quantity": 1,
+            "unit_price": 720_000,
+            "subtotal": 720_000,
+        }
+        context = ConversationContext(
+            session_id="stale-pending-after-cart",
+            channel="facebook",
+            sales_stage=SalesStage.COLLECTING_PRODUCT,
+            draft_product_code="GHLL8",
+            draft_customer_name="Vân",
+            draft_customer_phone="0946212718",
+            draft_payment_method="cod",
+            cart_items=[first_item, second_item],
+            pending_items=[{
+                "product_code": "GHLL8",
+                "product_name": first_product["product_name"],
+                "color": None,
+                "size": None,
+                "quantity": None,
+                "missing_fields": ["quantity", "color", "size"],
+            }],
+        )
+        plan = ConversationPlan(
+            intent=ConversationIntent.PRODUCT_INFORMATION,
+            reference_product_code="GHLL8",
+            shipping_address="33 Nguyễn Trãi, Quận 1, Hồ Chí Minh",
+        )
+        result = ExecutionResult(
+            success=True,
+            status="product_found",
+            intent=plan.intent,
+            products=[first_product],
+        )
+
+        OrderFlowService().apply(plan, result, context)
+        CTAService().apply(plan, result, context)
+
+        self.assertTrue(result.facts["stale_pending_items_removed"])
+        self.assertEqual(context.pending_items, [])
+        self.assertEqual(len(context.cart_items), 2)
+        self.assertEqual(context.sales_stage, SalesStage.AWAITING_FINAL_CONFIRMATION)
+        self.assertEqual(result.cta_type, CTAType.CONFIRM_ORDER)
+
+    def test_contact_turn_does_not_create_pending_duplicate_for_another_cart_item(self):
+        first_product = {
+            **PRODUCT,
+            "product_code": "GHLL8",
+            "colors": ["Đen", "Xám"],
+            "available_sizes": ["37"],
+            "prices": [750_000],
+            "variant_prices": [],
+        }
+        context = ConversationContext(
+            session_id="contact-does-not-reopen-cart",
+            channel="facebook",
+            sales_stage=SalesStage.COLLECTING_CONTACT,
+            draft_product_code="S32F8",
+            draft_color="Xanh",
+            draft_size="37",
+            draft_quantity=1,
+            cart_items=[
+                {
+                    "product_code": "GHLL8",
+                    "product_name": "Giày Cao Gót Slingback Zucia",
+                    "color": "Đen",
+                    "size": "37",
+                    "quantity": 1,
+                    "unit_price": 750_000,
+                    "subtotal": 750_000,
+                },
+                {
+                    "product_code": "S32F8",
+                    "product_name": "Giày Sandal Cao Gót Đông Hải",
+                    "color": "Xanh",
+                    "size": "37",
+                    "quantity": 1,
+                    "unit_price": 720_000,
+                    "subtotal": 720_000,
+                },
+            ],
+        )
+        # The model repeats GHLL8 from history while the customer only sends
+        # contact information. This must not reopen GHLL8 as an empty draft.
+        plan = ConversationPlan(
+            intent=ConversationIntent.PRODUCT_INFORMATION,
+            reference_product_code="GHLL8",
+            customer_name="Vân",
+            customer_phone="0946212718",
+            shipping_address="33 Nguyễn Trãi, Quận 1, Hồ Chí Minh",
+            payment_method="cod",
+        )
+        result = ExecutionResult(
+            success=True,
+            status="product_found",
+            intent=plan.intent,
+            products=[first_product],
+        )
+
+        OrderFlowService().apply(plan, result, context)
+        CTAService().apply(plan, result, context)
+
+        self.assertEqual(context.pending_items, [])
+        self.assertEqual(len(context.cart_items), 2)
+        self.assertEqual(context.draft_product_code, "GHLL8")
+        self.assertEqual(context.draft_color, "Đen")
+        self.assertEqual(context.sales_stage, SalesStage.AWAITING_FINAL_CONFIRMATION)
+        self.assertEqual(result.cta_type, CTAType.CONFIRM_ORDER)
+
     def test_ai_can_choose_contextual_cta_sentence_by_index(self):
         policy = CTAService()
         context = ConversationContext(session_id="ai-cta", channel="web")
@@ -1884,6 +2061,74 @@ class ConversationTests(unittest.TestCase):
         self.assertEqual(order["subtotal"], 1_700_000)
         self.assertEqual(result.facts["missing_product_fields"], [])
 
+    def test_two_recommended_products_are_kept_as_two_pending_order_lines(self):
+        first_product = {
+            **PRODUCT,
+            "product_code": "GHLL8",
+            "product_name": "Giày Cao Gót Slingback Zucia",
+            "colors": ["Đen", "Xám"],
+            "available_sizes": ["35", "36", "37", "38", "39"],
+            "prices": [750_000],
+            "variant_prices": [],
+        }
+        second_product = {
+            **PRODUCT,
+            "product_code": "S32F8",
+            "product_name": "Giày Sandal Cao Gót Đông Hải",
+            "colors": ["Đen", "Kem", "Xanh"],
+            "available_sizes": ["35", "36", "37", "38", "39"],
+            "prices": [720_000],
+            "variant_prices": [],
+        }
+
+        class RecommendedProductsRepository(FakeRepository):
+            def public_info(self, code):
+                return {
+                    "GHLL8": first_product,
+                    "S32F8": second_product,
+                }.get(code)
+
+        context = ConversationContext(
+            session_id="two-recommended-products",
+            channel="facebook",
+            recently_recommended_codes=["GHLL8", "S32F8"],
+        )
+        plan = ConversationPlan(
+            intent=ConversationIntent.PRODUCT_INFORMATION,
+            reference_product_code="GHLL8",
+            buying_intent=True,
+            requested_items=[
+                RequestedOrderItem(
+                    product_code="GHLL8", size="37", quantity=1,
+                ),
+                RequestedOrderItem(
+                    product_code="S32F8", size="37", quantity=1,
+                ),
+            ],
+        )
+
+        result = ConversationExecutor(
+            products=RecommendedProductsRepository(),
+        ).execute("giao mình 2 đôi này size 37", plan, context)
+        self.assertEqual(
+            [product["product_code"] for product in result.products],
+            ["GHLL8", "S32F8"],
+        )
+
+        OrderFlowService().apply(plan, result, context)
+        CTAService().apply(plan, result, context)
+
+        self.assertEqual(context.cart_items, [])
+        self.assertEqual(
+            [item["product_code"] for item in context.pending_items],
+            ["GHLL8", "S32F8"],
+        )
+        self.assertTrue(all(item["size"] == "37" for item in context.pending_items))
+        self.assertTrue(all(item["quantity"] == 1 for item in context.pending_items))
+        self.assertTrue(all(item["missing_fields"] == ["color"] for item in context.pending_items))
+        self.assertEqual(context.draft_product_code, "GHLL8")
+        self.assertEqual(result.cta_type, CTAType.CHOOSE_COLOR)
+
     def test_change_variant_replaces_existing_item_instead_of_adding(self):
         product = {
             **PRODUCT,
@@ -2021,6 +2266,28 @@ class ConversationTests(unittest.TestCase):
             "Dạ, em đã ghi nhận mỗi màu một đôi ạ ❤️\n\n"
             "Anh/chị cho em xin họ tên và số điện thoại ạ.",
         )
+
+    def test_presenter_removes_multiple_conflicting_generated_ctas(self):
+        result = ExecutionResult(
+            success=True,
+            status="order_flow_updated",
+            intent=ConversationIntent.PRODUCT_INFORMATION,
+            cta_type=CTAType.PROVIDE_CONTACT,
+            cta_text=(
+                "Anh/chị cho em xin họ tên, số điện thoại, địa chỉ nhận hàng "
+                "và phương thức thanh toán (COD hoặc chuyển khoản) ạ."
+            ),
+        )
+        reply = (
+            "Dạ anh/chị cho em xin họ tên, số điện thoại, địa chỉ nhận hàng "
+            "và phương thức thanh toán để em lên đơn giúp mình nhé ạ ❤️\n\n"
+            "Trong các màu trên, anh/chị muốn xem kỹ màu nào ạ?"
+        )
+
+        presented = ConversationPresenter.with_cta(reply, result)
+
+        self.assertEqual(presented, result.cta_text)
+        self.assertNotIn("màu nào", presented)
 
     def test_presenter_removes_duplicate_cta_after_normal_sentence(self):
         result = ExecutionResult(

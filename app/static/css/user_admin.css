@@ -1,0 +1,251 @@
+.user-admin-page .admin-page {
+  width: calc(100% - 210px);
+  min-width: 0;
+  overflow: hidden;
+}
+.user-admin-page .page-content {
+  max-width: calc(100% - 48px);
+}
+.user-card {
+  width: 100%;
+  min-width: 0;
+  overflow: hidden;
+}
+#userNotice {
+  display: none;
+}
+#userNotice.show {
+  display: flex;
+}
+.user-toolbar,
+.dialog-head,
+.dialog-actions,
+.user-actions {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+}
+.user-toolbar .muted {
+  margin: 4px 0 0;
+}
+.secondary-button {
+  color: #8f1023;
+  background: #fff;
+  border: 1px solid #e8cdd2;
+  box-shadow: none;
+}
+.secondary-button:hover:not(:disabled) {
+  color: #fff;
+  background: var(--red);
+  box-shadow: 0 7px 16px rgba(163, 18, 42, 0.18);
+}
+
+.user-table {
+  min-width: 760px;
+}
+.user-table td {
+  vertical-align: middle;
+}
+
+.user-identity {
+  display: flex;
+  align-items: center;
+  gap: 11px;
+}
+.user-avatar {
+  width: 34px;
+  height: 34px;
+  border-radius: 50%;
+  flex: none;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: linear-gradient(135deg, #c11936, #7b0c1d);
+  color: #fff;
+  font-size: 12.5px;
+  font-weight: 800;
+  letter-spacing: 0.02em;
+}
+.user-id-text {
+  min-width: 0;
+}
+.user-id-text b {
+  display: block;
+  font-size: 13.5px;
+  font-weight: 650;
+}
+.user-id-text small {
+  display: block;
+  margin-top: 1px;
+  color: var(--muted);
+  font-size: 12px;
+}
+
+.user-table select.row-role {
+  min-width: 150px;
+  padding: 8px 10px;
+  font-size: 13px;
+  font-weight: 600;
+}
+.user-status.active {
+  color: #087e59;
+  background: #e9f8f2;
+  border-color: #c8eee1;
+}
+.user-status.locked {
+  color: #9b1429;
+  background: #fff0f2;
+  border-color: #f1ccd2;
+}
+.protected-value {
+  color: #5d4a4e;
+  background: #f4eef0;
+  border-color: #eadde0;
+}
+
+.status-switch {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  padding: 5px 11px 5px 5px;
+  border-radius: 999px;
+  background: #fff;
+  border: 1px solid var(--line);
+  box-shadow: none;
+  color: #4a3a3e;
+  font-size: 12px;
+  font-weight: 700;
+  white-space: nowrap;
+}
+.status-switch:hover:not(:disabled) {
+  transform: none;
+  box-shadow: none;
+  background: #fdf7f8;
+}
+.status-switch .track {
+  position: relative;
+  width: 32px;
+  height: 18px;
+  border-radius: 999px;
+  background: #c8c0c1;
+  transition: 0.18s ease;
+  flex: none;
+}
+.status-switch .thumb {
+  position: absolute;
+  top: 2px;
+  left: 2px;
+  width: 14px;
+  height: 14px;
+  border-radius: 50%;
+  background: #fff;
+  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.25);
+  transition: 0.18s ease;
+}
+.status-switch.on .track {
+  background: #14845f;
+}
+.status-switch.on .thumb {
+  left: 16px;
+}
+.status-switch:disabled {
+  opacity: 0.6;
+  cursor: wait;
+}
+
+.user-actions {
+  justify-content: flex-start;
+}
+.user-actions button {
+  padding: 9px 11px;
+  white-space: nowrap;
+}
+.user-actions .password-button {
+  color: #8f1023;
+  background: #fff;
+  border: 1px solid #e8cdd2;
+  box-shadow: none;
+}
+.user-actions .password-button:hover:not(:disabled) {
+  color: #fff;
+  background: var(--red);
+  box-shadow: 0 7px 16px rgba(163, 18, 42, 0.18);
+}
+.current-user-note {
+  display: block;
+  margin-top: 3px;
+  color: #087e59;
+  font-size: 11px;
+  font-weight: 700;
+}
+.user-empty {
+  padding: 34px !important;
+  text-align: center;
+  color: var(--muted);
+}
+
+.user-dialog {
+  width: min(720px, calc(100vw - 32px));
+  padding: 0;
+  border: 0;
+  border-radius: 20px;
+  box-shadow: 0 30px 90px rgba(40, 10, 16, 0.28);
+}
+.user-dialog::backdrop {
+  background: rgba(32, 11, 15, 0.55);
+  backdrop-filter: blur(3px);
+}
+.user-dialog form {
+  padding: 25px;
+}
+.dialog-head {
+  align-items: flex-start;
+  padding-bottom: 16px;
+  border-bottom: 1px solid var(--line);
+}
+.dialog-head h2 {
+  margin: 0 0 5px;
+}
+.dialog-head p {
+  margin: 0;
+  color: var(--muted);
+  font-size: 13px;
+}
+.icon-button {
+  width: 36px;
+  height: 36px;
+  padding: 0;
+  border-radius: 50%;
+  font-size: 24px;
+  line-height: 1;
+}
+.form-grid {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 0 16px;
+}
+.dialog-actions {
+  justify-content: flex-end;
+  margin-top: 22px;
+}
+.small-dialog {
+  width: min(480px, calc(100vw - 32px));
+}
+@media (max-width: 760px) {
+  .user-admin-page .admin-page {
+    width: 100%;
+  }
+  .user-admin-page .page-content {
+    max-width: calc(100% - 28px);
+  }
+}
+@media (max-width: 720px) {
+  .user-toolbar {
+    align-items: flex-start;
+    flex-direction: column;
+  }
+  .form-grid {
+    grid-template-columns: 1fr;
+  }
+}
