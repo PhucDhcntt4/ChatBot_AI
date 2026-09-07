@@ -5,7 +5,8 @@ Tài liệu này hướng dẫn triển khai source hiện tại lên một máy
 - Nginx và HTTPS làm cổng truy cập công khai.
 - FastAPI/Uvicorn phục vụ Web, Telegram và Facebook webhook.
 - Một product sync worker độc lập để đồng bộ Shopify, tải ảnh và tạo image embedding.
-- PostgreSQL có extension `pgvector` làm nguồn dữ liệu sản phẩm, RAG và lịch sử hội thoại.
+- PostgreSQL có extension `pgvector` lưu sản phẩm, vector ảnh và lịch sử hội thoại.
+- RAG Service chạy riêng, sở hữu tài liệu và text embedding; bot chỉ gọi HTTP.
 - Redis lưu context hội thoại, Human mode và hàng đợi đồng bộ.
 - Gemini hoặc OpenAI làm AI provider.
 - Google Sheets nhận đơn đã xác nhận nếu tính năng này được bật.
@@ -150,7 +151,6 @@ export DATABASE_URL='postgresql://donghai_bot:MAT_KHAU_DA_URL_ENCODE@127.0.0.1:5
 
 psql "$DATABASE_URL" -v ON_ERROR_STOP=1 -f db_postgre/001_product_catalog.sql
 psql "$DATABASE_URL" -v ON_ERROR_STOP=1 -f db_postgre/002_product_image_embeddings.sql
-psql "$DATABASE_URL" -v ON_ERROR_STOP=1 -f db_postgre/003_customer_care_rag.sql
 psql "$DATABASE_URL" -v ON_ERROR_STOP=1 -f db_postgre/004_conversation_history.sql
 psql "$DATABASE_URL" -v ON_ERROR_STOP=1 -f db_postgre/005_admin_users.sql
 ```
@@ -159,9 +159,10 @@ psql "$DATABASE_URL" -v ON_ERROR_STOP=1 -f db_postgre/005_admin_users.sql
 
 1. `001_product_catalog.sql`: catalog, variants, màu, ảnh và metadata đồng bộ.
 2. `002_product_image_embeddings.sql`: vector ảnh CLIP 512 chiều.
-3. `003_customer_care_rag.sql`: tài liệu/chunk RAG 768 chiều.
-4. `004_conversation_history.sql`: session và lịch sử tin nhắn lâu dài.
-5. `005_admin_users.sql`: tài khoản, password hash, trạng thái và role quản trị.
+3. `004_conversation_history.sql`: session và lịch sử tin nhắn lâu dài; giữ `rag_sources` để lưu nguồn trả về từ RAG Service.
+4. `005_admin_users.sql`: tài khoản, password hash, trạng thái và role quản trị.
+
+Migration tạo RAG local (003) đã được loại bỏ. Không tạo lại `public.knowledge_documents` hoặc `public.knowledge_chunks` trong DB bot. Giữ extension `vector` cho embedding ảnh sản phẩm; database/schema của RAG Service do dự án riêng quản lý.
 
 Kiểm tra:
 
@@ -271,16 +272,14 @@ VECTOR_MAX_CANDIDATES=3
 VECTOR_REFERENCES_PER_PRODUCT=2
 PRODUCT_ALBUM_IMAGE_LIMIT=4
 
-# RAG. Provider/model/dimension phải khớp dữ liệu đã index
+# RAG Service (ví dụ bot 8000, service 8001; dùng đúng cổng thực tế)
 RAG_ENABLED=true
-RAG_EMBEDDING_PROVIDER=gemini
-RAG_EMBEDDING_MODEL=gemini-embedding-001
-RAG_EMBEDDING_DIMENSION=768
-RAG_TOP_K=5
-RAG_MIN_SIMILARITY=0.45
-RAG_MAX_CONTEXT_CHARS=6000
-RAG_CHUNK_SIZE=1200
-RAG_CHUNK_OVERLAP=180
+RAG_SERVICE_URL=http://127.0.0.1:8001
+RAG_SERVICE_API_KEY=DIEN_SEARCH_API_KEY_CUA_RAG_SERVICE
+RAG_SERVICE_TIMEOUT_SECONDS=40
+# Backend Knowledge UI: ADMIN_API_KEY của service, không gửi xuống trình duyệt
+RAG_SERVICE_ADMIN_API_KEY=DIEN_ADMIN_API_KEY_CUA_RAG_SERVICE
+RAG_SERVICE_ADMIN_TIMEOUT_SECONDS=180
 
 # Gợi ý sản phẩm
 PRODUCT_RECOMMENDATION_DEFAULT_COUNT=3
@@ -317,8 +316,6 @@ Lưu ý cấu hình:
 - Nếu chỉ dùng Web, đặt `CHANNEL_PROVIDER=web` và có thể bỏ token Telegram/Facebook.
 - Khi có `telegram` trong `CHANNEL_PROVIDER`, bắt buộc có bot token và webhook secret hợp lệ.
 - Khi có `facebook`, phải cấu hình page access token, verify token và app secret.
-- `RAG_EMBEDDING_PROVIDER` độc lập với `AI_PROVIDER`. Không tự đổi provider/model RAG khi database vẫn chứa embedding cũ.
-- `RAG_EMBEDDING_DIMENSION` hiện bắt buộc bằng `768` để khớp migration 003.
 - Image embedding hiện là `512` chiều. Đổi model/pretrained cần tạo lại image embedding.
 - Để lần khởi động đầu dễ kiểm tra, có thể tạm đặt `RAG_ENABLED=false`, `GOOGLE_SHEETS_ENABLED=false`, và chỉ bật `CHANNEL_PROVIDER=web`. Bật từng tích hợp sau khi core đã chạy ổn.
 
@@ -620,12 +617,15 @@ Chatbot đọc sản phẩm runtime từ PostgreSQL. `products.json`/snapshot kh
 
 ### 16.2. Knowledge/RAG
 
-1. Mở `/admin/knowledge`.
-2. Upload TXT, Markdown hoặc PDF có text.
-3. Chờ import và embedding hoàn tất.
-4. Kiểm tra log startup phải có `RAG V2 ready` với số document lớn hơn 0.
-
-Nếu đổi `RAG_EMBEDDING_PROVIDER` hoặc `RAG_EMBEDDING_MODEL`, phải tạo lại embedding tài liệu. Query embedding và document embedding khác provider/model sẽ không tìm thấy nhau dù cùng 768 chiều.
+1. Triển khai RAG Service ở địa chỉ/cổng riêng theo README của service; không trùng cổng bot.
+2. Cấu hình RAG_SERVICE_URL, RAG_SERVICE_API_KEY (= SEARCH_API_KEY), RAG_SERVICE_ADMIN_API_KEY (= ADMIN_API_KEY) ở backend bot. Không đưa key vào HTML/JS.
+3. Mở `/admin/knowledge` trong bot; giao diện cũ thêm/xem/xóa thông qua backend gọi service. Chỉ backend cần truy cập RAG_SERVICE_URL.
+   Upload xử lý đồng bộ, đặt RAG_SERVICE_ADMIN_TIMEOUT_SECONDS (mặc định 180 giây) và timeout reverse proxy đủ dài. Không tự retry upload/delete khi timeout; kiểm tra lại danh sách trước.
+   Trang/API vẫn yêu cầu đăng nhập quản trị theo quyền hiện có của bot; key service chỉ lưu server-side.
+4. Kiểm tra nhóm tài liệu khớp planner (store, size_guide, warranty...).
+5. Hỏi qua bot và kiểm tra `RAG REMOTE status=knowledge_found`. Lỗi service không fallback về kho cũ.
+6. Bot không cần bảng RAG local. Phí vận chuyển đọc nội dung tài liệu qua API bằng SHIPPING_POLICY_DOCUMENT_ID và RAG_SERVICE_ADMIN_API_KEY; file knowledge/shipping/Dat_Hang_Van_Chuyen.txt chỉ còn là bản đối chiếu. Sao lưu trước khi dọn bảng RAG cũ trên các môi trường khác; không xóa bảng/schema thuộc RAG Service.
+7. Model/chunking/re-index do RAG Service quản lý; đổi model soạn câu trả lời của bot không thay embedding service.
 
 ## 17. Checklist kiểm tra sau deploy
 
@@ -714,7 +714,6 @@ set +a
 
 psql "$DATABASE_URL" -v ON_ERROR_STOP=1 -f db_postgre/001_product_catalog.sql
 psql "$DATABASE_URL" -v ON_ERROR_STOP=1 -f db_postgre/002_product_image_embeddings.sql
-psql "$DATABASE_URL" -v ON_ERROR_STOP=1 -f db_postgre/003_customer_care_rag.sql
 psql "$DATABASE_URL" -v ON_ERROR_STOP=1 -f db_postgre/004_conversation_history.sql
 psql "$DATABASE_URL" -v ON_ERROR_STOP=1 -f db_postgre/005_admin_users.sql
 
@@ -754,7 +753,7 @@ Nên giám sát:
 
 1. **RBAC mới áp dụng cho quản lý tài khoản**: chỉ `admin` được mở `/admin/users`; nên tiếp tục giới hạn từng trang nghiệp vụ cho `manager` và `staff` khi đội vận hành mở rộng, đồng thời có thể giữ VPN/IP allowlist ở lớp Nginx.
 2. **Chỉ nên dùng một Uvicorn worker**: Facebook per-recipient queue và chống trùng event đang trong RAM.
-3. **Knowledge import chạy trong FastAPI background task**: job lớn có thể mất khi app restart; nên chuyển sang worker bền vững.
+3. **RAG là dịch vụ riêng**: cần triển khai, backup, giới hạn truy cập và giám sát service độc lập; bot không còn import Knowledge.
 4. **Google Sheets không phải order database chính thức**: chỉ là kênh bàn giao để nhân viên kiểm tra.
 5. **Khuyến mãi là đơn nháp do AI hỗ trợ**: nhân viên vẫn cần xác nhận trước khi tạo đơn chính thức.
 6. **Local product images cần shared storage** nếu app và worker chạy ở hai máy/container khác nhau.
@@ -775,7 +774,7 @@ Kiểm tra lần lượt:
 - AI provider có đúng API key/model không.
 - Channel đã bật có đủ token/secret không.
 - Google Sheets có bị bật khi credential chưa đúng không.
-- RAG model/provider/dimension có khớp document trong DB không.
+- RAG_SERVICE_URL/API_KEY/timeout đã cấu hình và service có hoạt động không.
 
 ### Worker không xử lý job
 
@@ -787,12 +786,12 @@ redis-cli ping
 
 Nếu worker chỉ đứng yên không có log mới nhưng queue trống thì không phải lỗi.
 
-### RAG không trả lời
+### RAG Service (ví dụ bot 8000, service 8001; dùng đúng cổng thực tế)
 
 - Kiểm tra `RAG_ENABLED=true`.
-- Kiểm tra startup log `documents=<số lớn hơn 0>`.
-- Kiểm tra provider/model/dimension trong `.env` khớp tài liệu đã import.
-- Re-import tài liệu sau khi đổi embedding provider/model.
+- Kiểm tra log RAG REMOTE, địa chỉ/cổng service và SEARCH_API_KEY.
+- Kiểm tra tài liệu/category/trạng thái bên RAG Service.
+- HTTP 401: key; 503: service/DB/Gemini; knowledge_not_found: chưa có đoạn phù hợp.
 
 ### Ảnh nhận diện sai hoặc không nhận diện
 

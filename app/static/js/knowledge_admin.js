@@ -36,15 +36,18 @@ const ICON = {
 };
 
 let documentsCache = [];
+let activeDocumentId = null;
+let uploading = false;
 const DEFAULT_CATEGORIES = [
-  "customer_care",
-  "product_info",
-  "shipping",
-  "return_policy",
-  "promotion",
-  "faq",
+  ["store", "Cửa hàng"],
+  ["size_guide", "Hướng dẫn chọn size"],
+  ["warranty", "Bảo hành"],
+  ["returns", "Đổi trả"],
+  ["shipping", "Giao hàng"],
+  ["promotion", "Khuyến mãi"],
+  ["customer_care", "Chăm sóc khách hàng"],
 ];
-const NEW_CATEGORY_VALUE = "__new__";
+const NEW_CATEGORY_VALUE = "custom";
 
 function toggleNewCategory(focusInput = false) {
   const isNew = $("knowledgeCategory").value === NEW_CATEGORY_VALUE;
@@ -53,21 +56,19 @@ function toggleNewCategory(focusInput = false) {
   if (isNew && focusInput) $("newKnowledgeCategory").focus();
 }
 
-function renderCategoryOptions(documents, preferredCategory = null) {
+function renderCategoryOptions(preferredCategory = null) {
   const select = $("knowledgeCategory");
-  const currentCategory = preferredCategory || select.value || "customer_care";
-  const savedCategories = (documents || [])
-    .map((item) => String(item.category || "").trim())
-    .filter(Boolean)
-    .sort((left, right) => left.localeCompare(right, "vi"));
-  const categories = [...new Set([...DEFAULT_CATEGORIES, ...savedCategories])];
-
-  select.innerHTML = `${categories
-    .map((category) => `<option value="${html(category)}">${html(category)}</option>`)
-    .join("")}<option value="${NEW_CATEGORY_VALUE}">+ Tạo nhóm mới</option>`;
-  select.value = categories.includes(currentCategory)
+  const currentCategory = preferredCategory || select.value || "store";
+  const isKnown = DEFAULT_CATEGORIES.some(([value]) => value === currentCategory);
+  select.innerHTML = `${DEFAULT_CATEGORIES
+    .map(([value, label]) => `<option value="${html(value)}">${html(label)}</option>`)
+    .join("")}<option value="${NEW_CATEGORY_VALUE}">Nhóm khác…</option>`;
+  select.value = isKnown
     ? currentCategory
-    : "customer_care";
+    : NEW_CATEGORY_VALUE;
+  if (preferredCategory && !isKnown && preferredCategory !== NEW_CATEGORY_VALUE) {
+    $("newKnowledgeCategory").value = preferredCategory;
+  }
   toggleNewCategory();
 }
 
@@ -85,7 +86,7 @@ async function loadDocuments(preferredCategory = null) {
   try {
     const data = await json(await fetch("/admin/knowledge/api/documents"));
     documentsCache = data.documents;
-    renderCategoryOptions(data.documents, preferredCategory);
+    renderCategoryOptions(preferredCategory);
     $("documentCount").textContent = `${data.total} tài liệu`;
     $("documentRows").innerHTML = data.documents.length
       ? data.documents
@@ -106,6 +107,8 @@ async function loadDocuments(preferredCategory = null) {
           .join("")
       : `<div class="empty-row">${ICON.empty}<div class="empty-title">Chưa có tài liệu</div><div class="empty-hint">Tải lên một tệp ở bên trái để bắt đầu tạo embedding.</div></div>`;
   } catch (error) {
+    documentsCache = [];
+    $("documentCount").textContent = "Không tải được danh sách";
     $("documentRows").innerHTML =
       `<div class="empty-row">${ICON.alert}<div class="empty-title">Không tải được dữ liệu</div><div class="empty-hint">${html(error.message)}</div></div>`;
   }
@@ -138,10 +141,12 @@ async function deleteDocument(id, title, onDone) {
 function openDocModal(id) {
   const item = documentsCache.find((doc) => String(doc.id) === String(id));
   if (!item) return;
+  activeDocumentId = String(id);
   $("docModalExt").textContent = extOf(item.title);
   $("docModalTitle").textContent = item.title;
   $("docModalSource").textContent = item.source_key;
-  $("docModalCategory").textContent = item.category;
+  $("docModalCategory").textContent =
+    DEFAULT_CATEGORIES.find(([value]) => value === item.category)?.[1] || item.category;
   $("docModalChunks").textContent = `${item.chunk_count} chunk`;
   $("docModalModel").textContent = item.embedding_model;
   const status = $("docModalStatus");
@@ -162,8 +167,10 @@ async function loadDocContent(id) {
     const data = await json(
       await fetch(`/admin/knowledge/api/documents/${id}`),
     );
+    if (activeDocumentId !== String(id)) return;
     const content =
       data.content ||
+      data.source_text ||
       data.preview ||
       (Array.isArray(data.chunks)
         ? data.chunks.map((c) => c.content || c.text).join("\n\n")
@@ -175,12 +182,14 @@ async function loadDocContent(id) {
       box.textContent = "Tài liệu chưa có nội dung xem trước.";
     }
   } catch (error) {
+    if (activeDocumentId !== String(id)) return;
     box.className = "modal-content-box muted";
-    box.textContent = "Không tải được nội dung chi tiết.";
+    box.textContent = error.message;
   }
 }
 
 function closeDocModal() {
+  activeDocumentId = null;
   $("docModal").hidden = true;
 }
 
@@ -229,34 +238,9 @@ function renderSteps(job) {
   });
 }
 
-async function watchJob(id) {
-  const job = await json(await fetch(`/admin/knowledge/api/jobs/${id}`));
-  showNotice(
-    `${job.message}${job.error ? `\n${job.error}` : ""}`,
-    job.status === "failed"
-      ? "error"
-      : job.status === "completed"
-        ? "success"
-        : "progress",
-  );
-  renderSteps(job);
-  if (["queued", "running"].includes(job.status))
-    setTimeout(
-      () => watchJob(id).catch((e) => showNotice(e.message, "error")),
-      1200,
-    );
-  else {
-    $("uploadButton").disabled = false;
-    if (job.status === "completed") {
-      clearSelectedFile();
-      $("newKnowledgeCategory").value = "";
-      loadDocuments(job.category);
-    }
-  }
-}
-
 function setSelectedFile(file) {
   const input = $("knowledgeFile");
+  if (uploading) return;
   if (file) {
     const transfer = new DataTransfer();
     transfer.items.add(file);
@@ -305,8 +289,13 @@ $("dropZone").addEventListener("drop", (event) => {
 
 $("uploadForm").onsubmit = async (event) => {
   event.preventDefault();
+  if (uploading) return;
   const file = $("knowledgeFile").files[0];
   if (!file) return;
+  if (file.size > 10 * 1024 * 1024) {
+    showNotice("Tài liệu vượt quá 10 MB.", "error");
+    return;
+  }
   const category = selectedCategory();
   if (!/^[a-z0-9][a-z0-9_-]{0,99}$/.test(category)) {
     showNotice(
@@ -319,19 +308,32 @@ $("uploadForm").onsubmit = async (event) => {
   const body = new FormData();
   body.append("file", file);
   body.append("category", category);
-  $("uploadButton").disabled = true;
-  showNotice("Đang tải tài liệu...", "progress");
+  uploading = true;
+  const controls = ["uploadButton", "knowledgeFile", "knowledgeCategory", "newKnowledgeCategory", "clearFile", "refreshDocuments"];
+  controls.forEach((id) => { $(id).disabled = true; });
+  $("jobSteps").hidden = true;
+  showNotice("Đang gửi tài liệu và chờ RAG Service xử lý. Vui lòng không tải lại trang.", "progress");
   try {
-    const job = await json(
+    const result = await json(
       await fetch("/admin/knowledge/api/upload", { method: "POST", body }),
     );
-    watchJob(job.id);
+    if (result.success !== true || !result.document) {
+      throw new Error("Chưa xác nhận được kết quả. Hãy làm mới danh sách trước khi thử lại.");
+    }
+    renderSteps({ status: "completed" });
+    showNotice("Đã thêm tài liệu và lập chỉ mục trên RAG Service.", "success");
+    clearSelectedFile();
+    $("newKnowledgeCategory").value = "";
+    await loadDocuments(category);
   } catch (error) {
-    $("uploadButton").disabled = false;
+    $("jobSteps").hidden = true;
     showNotice(error.message, "error");
+  } finally {
+    uploading = false;
+    controls.forEach((id) => { $(id).disabled = false; });
   }
 };
-$("refreshDocuments").onclick = loadDocuments;
+$("refreshDocuments").onclick = () => loadDocuments();
 $("documentRows").addEventListener("click", (event) => {
   const deleteButton = event.target.closest(".delete-document");
   if (deleteButton) {

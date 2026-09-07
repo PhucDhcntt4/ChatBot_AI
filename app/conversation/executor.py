@@ -238,9 +238,25 @@ class ConversationExecutor:
                 knowledge_query,
                 categories=plan.knowledge_categories or None,
             )
+
+            if (
+                knowledge_result.get("status")
+                == "knowledge_service_unavailable"
+            ):
+                return ExecutionResult(
+                    success=False,
+                    status="knowledge_service_unavailable",
+                    intent=plan.intent,
+                    products=products,
+                )
+
             if knowledge_result.get("success"):
-                knowledge_context = str(knowledge_result.get("content") or "")
-                sources = list(knowledge_result.get("sources") or [])
+                knowledge_context = str(
+                    knowledge_result.get("content") or ""
+                )
+                sources = list(
+                    knowledge_result.get("sources") or []
+                )
         return ExecutionResult(
             success=bool(products),
             status="product_found" if products else "product_context_missing",

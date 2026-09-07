@@ -22,14 +22,24 @@ CREATE TABLE IF NOT EXISTS admin_users (
         CHECK (session_version > 0)
 );
 
--- Upgrade installations created before admin email was removed.
-DROP INDEX IF EXISTS uq_admin_users_email_lower;
-ALTER TABLE admin_users DROP COLUMN IF EXISTS email;
-
 CREATE UNIQUE INDEX IF NOT EXISTS uq_admin_users_username_lower
 ON admin_users(LOWER(username));
 
 CREATE INDEX IF NOT EXISTS idx_admin_users_active
 ON admin_users(is_active, role);
+
+INSERT INTO admin_users (
+    username,
+    password_hash,
+    display_name,
+    role
+)
+VALUES (
+    'admin',
+    'PASSWORD_HASH_O_DAY',
+    'Quản trị viên',
+    'admin'
+)
+RETURNING *;
 
 COMMIT;

@@ -93,30 +93,45 @@ class AdminTests(unittest.TestCase):
             script.text,
         )
 
-    def test_knowledge_upload_clears_selected_file_after_success(self):
-        page = self.client.get("/admin/knowledge")
-        script = self.client.get("/static/js/knowledge_admin.js")
+    def test_knowledge_page_keeps_existing_ui(self):
+        response = self.client.get("/admin/knowledge", follow_redirects=False)
+        self.assertEqual(response.status_code, 200)
+        self.assertNotIn("location", response.headers)
+        for element in ('id="uploadForm"', 'id="knowledgeCategory"', 'id="documentRows"', 'id="docModal"'):
+            self.assertIn(element, response.text)
+        self.assertIn("20260907-rag-categories2", response.text)
 
-        self.assertEqual(page.status_code, 200)
+    def test_knowledge_categories_match_rag_service_labels_and_order(self):
+        import re
+
+        page = self.client.get("/admin/knowledge").text
+        select = re.search(r'<select id="knowledgeCategory" required>(.*?)</select>', page, re.S).group(1)
+        self.assertEqual(re.findall(r'<option value="([^"]+)">([^<]+)</option>', select), [
+            ("store", "Cửa hàng"),
+            ("size_guide", "Hướng dẫn chọn size"),
+            ("warranty", "Bảo hành"),
+            ("returns", "Đổi trả"),
+            ("shipping", "Giao hàng"),
+            ("promotion", "Khuyến mãi"),
+            ("customer_care", "Chăm sóc khách hàng"),
+            ("custom", "Nhóm khác…"),
+        ])
+
+    def test_knowledge_script_uses_bot_api_without_job_polling(self):
+        script = self.client.get("/static/js/knowledge_admin.js")
         self.assertEqual(script.status_code, 200)
-        self.assertIn("20260903-category-select1", page.text)
-        self.assertIn("function clearSelectedFile()", script.text)
-        self.assertIn(
-            'if (job.status === "completed") {\n      clearSelectedFile();',
-            script.text,
-        )
+        self.assertIn('fetch("/admin/knowledge/api/upload"', script.text)
+        self.assertIn("clearSelectedFile();", script.text)
+        self.assertIn("window.confirm(", script.text)
+        self.assertNotIn("watchJob", script.text)
+        self.assertNotIn("/api/jobs/", script.text)
+        self.assertNotIn("Authorization", script.text)
+        self.assertNotIn("API_KEY", script.text)
 
-    def test_knowledge_category_can_select_existing_or_create_new(self):
-        page = self.client.get("/admin/knowledge")
-        script = self.client.get("/static/js/knowledge_admin.js")
-
-        self.assertEqual(page.status_code, 200)
-        self.assertIn('<select id="knowledgeCategory" required>', page.text)
-        self.assertIn('<option value="__new__">+ Tạo nhóm mới</option>', page.text)
-        self.assertIn('id="newKnowledgeCategory"', page.text)
-        self.assertIn("function renderCategoryOptions", script.text)
-        self.assertIn("function selectedCategory", script.text)
-        self.assertIn('body.append("category", category);', script.text)
+    def test_knowledge_page_requires_bot_login(self):
+        admin_auth_service.enabled = True
+        with patch.object(admin_auth_service, "read_session", return_value=None):
+            self.assertEqual(self.client.get("/admin/knowledge", follow_redirects=False).status_code, 401)
 
     def test_human_mode_duration_is_persisted_through_api(self):
         service = Mock()

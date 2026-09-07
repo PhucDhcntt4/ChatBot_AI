@@ -9,7 +9,8 @@ Hướng dẫn triển khai máy chủ Ubuntu/production nằm trong file DEPLOY
 1. THÀNH PHẦN CỦA HỆ THỐNG
 
 - FastAPI/Uvicorn: web, API, trang quản trị và webhook.
-- PostgreSQL + pgvector: sản phẩm, vector, Knowledge và lịch sử hội thoại.
+- PostgreSQL + pgvector: sản phẩm, vector ảnh và lịch sử hội thoại.
+- RAG Service riêng: tài liệu, text embedding và API tìm kiếm.
 - Redis: trạng thái hội thoại, Human mode và hàng đợi đồng bộ sản phẩm.
 - Product sync worker: đồng bộ Shopify, tải ảnh và tạo image embedding.
 - Gemini hoặc OpenAI: lập kế hoạch và soạn câu trả lời.
@@ -110,7 +111,6 @@ Chạy migration theo đúng thứ tự:
 
     psql "$env:DATABASE_URL" -v ON_ERROR_STOP=1 -f db_postgre/001_product_catalog.sql
     psql "$env:DATABASE_URL" -v ON_ERROR_STOP=1 -f db_postgre/002_product_image_embeddings.sql
-    psql "$env:DATABASE_URL" -v ON_ERROR_STOP=1 -f db_postgre/003_customer_care_rag.sql
     psql "$env:DATABASE_URL" -v ON_ERROR_STOP=1 -f db_postgre/004_conversation_history.sql
     psql "$env:DATABASE_URL" -v ON_ERROR_STOP=1 -f db_postgre/005_admin_users.sql
 
@@ -143,13 +143,14 @@ Cấu hình tối thiểu để chạy Web bằng Gemini:
     # Kênh chạy lần đầu
     CHANNEL_PROVIDER=web
 
-    # RAG
+    # RAG Service (ví dụ bot 8000, service 8001; dùng đúng cổng thực tế)
     RAG_ENABLED=true
-    RAG_EMBEDDING_PROVIDER=gemini
-    RAG_EMBEDDING_MODEL=gemini-embedding-001
-    RAG_EMBEDDING_DIMENSION=768
-    RAG_TOP_K=5
-    RAG_MIN_SIMILARITY=0.45
+    RAG_SERVICE_URL=http://127.0.0.1:8001
+    RAG_SERVICE_API_KEY=DIEN_SEARCH_API_KEY_CUA_RAG_SERVICE
+    RAG_SERVICE_TIMEOUT_SECONDS=40
+    # Backend Knowledge UI: ADMIN_API_KEY của service, không gửi xuống trình duyệt
+    RAG_SERVICE_ADMIN_API_KEY=DIEN_ADMIN_API_KEY_CUA_RAG_SERVICE
+    RAG_SERVICE_ADMIN_TIMEOUT_SECONDS=180
 
     # Nhận diện ảnh
     PRODUCT_VECTOR_SEARCH_ENABLED=true
@@ -354,10 +355,20 @@ Sản phẩm:
 
 Knowledge/RAG:
 
-1. Mở /admin/knowledge.
-2. Chọn nhóm tài liệu có sẵn hoặc tạo nhóm mới.
-3. Upload TXT, Markdown hoặc PDF có lớp văn bản.
-4. Chờ import và embedding hoàn tất.
+1. Khởi chạy RAG Service ở cổng khác bot, theo README của service.
+2. Điền RAG_SERVICE_URL và RAG_SERVICE_API_KEY (= SEARCH_API_KEY của service).
+3. Điền RAG_SERVICE_ADMIN_API_KEY trong .env bot bằng ADMIN_API_KEY của service.
+4. Mở /admin/knowledge ngay trong bot để thêm/xem/xóa tài liệu; giao diện giữ nguyên.
+   Backend chuyển yêu cầu tới service, không gửi key xuống trình duyệt.
+   Upload chờ lập chỉ mục xong, không polling job nội bộ; timeout mặc định 180 giây.
+5. Hỏi qua bot, kiểm tra RAG REMOTE status=knowledge_found.
+6. Không còn tạo embedding/truy vấn database RAG nội bộ; API Knowledge gọi service.
+   Nếu upload/delete timeout, làm mới danh sách trước khi thử lại; không tự retry.
+7. Không tạo bảng RAG local trong DB bot; migration tạo RAG local (003) đã bỏ.
+   Giữ extension vector cho ảnh sản phẩm và rag_sources trong lịch sử hội thoại.
+   Cấu hình SHIPPING_POLICY_DOCUMENT_ID để đọc tài liệu vận chuyển qua API;
+   file vận chuyển local chỉ còn dùng đối chiếu, không dùng tính phí runtime.
+8. Nhân viên chỉ cần truy cập trang bot; không cần mở trực tiếp địa chỉ RAG.
 
 PostgreSQL là nguồn dữ liệu sản phẩm chính của chatbot. Không cần manifest.json.
 
@@ -407,8 +418,8 @@ AI trả lỗi 429/503:
 RAG không tìm được dữ liệu:
 
 - Kiểm tra RAG_ENABLED=true.
-- Provider/model/dimension phải khớp dữ liệu đã embedding.
-- Sau khi đổi embedding model/provider cần import lại Knowledge.
+- Kiểm tra URL/cổng, SEARCH_API_KEY và log RAG REMOTE.
+- Kiểm tra tài liệu/category đã lập chỉ mục và đang bật tại RAG Service.
 
 Google Sheets lỗi:
 

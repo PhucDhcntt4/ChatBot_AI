@@ -10,7 +10,7 @@ load_dotenv(PROJECT_ROOT / ".env")
 PROMPT_DIR = PROJECT_ROOT / "prompts"
 INTERNAL_PROMPT_DIR = PROJECT_ROOT / "app" / "ai" / "internal_prompts"
 DATA_DIR = PROJECT_ROOT / "data"
-KNOWLEDGE_DIR = PROJECT_ROOT / "knowledge"
+
 CONVERSATION_INSTRUCTION_PATH = PROMPT_DIR / "instruction.txt"
 CTA_TEMPLATE_PATH = PROMPT_DIR / "cta_templates.txt"
 FAST_RESPONSE_PATH = PROMPT_DIR / "fast_responses.txt"
@@ -44,6 +44,19 @@ def env_bool(name: str, default: bool = False) -> bool:
 
 
 RAG_ENABLED = env_bool("RAG_ENABLED", False)
+RAG_SERVICE_URL = os.getenv("RAG_SERVICE_URL", "").strip().rstrip("/")
+RAG_SERVICE_API_KEY = os.getenv("RAG_SERVICE_API_KEY", "").strip()
+# Server-only credential for the bot's Knowledge administration page.
+RAG_SERVICE_ADMIN_API_KEY = os.getenv("RAG_SERVICE_ADMIN_API_KEY", "").strip()
+RAG_SERVICE_ADMIN_TIMEOUT_SECONDS = float(
+    os.getenv("RAG_SERVICE_ADMIN_TIMEOUT_SECONDS", "180")
+)
+RAG_SERVICE_TIMEOUT_SECONDS = float(
+    os.getenv("RAG_SERVICE_TIMEOUT_SECONDS", "40")
+)
+SHIPPING_POLICY_DOCUMENT_ID = int(
+    os.getenv("SHIPPING_POLICY_DOCUMENT_ID", "0")
+)
 CHANNEL_PROVIDER = os.getenv("CHANNEL_PROVIDER", "web").strip().casefold()
 CHANNEL_PROVIDERS = frozenset(
     provider.strip()
@@ -86,16 +99,6 @@ GOOGLE_SERVICE_ACCOUNT_FILE = os.getenv(
     "GOOGLE_SERVICE_ACCOUNT_FILE",
     "secrets/google-sheets-service-account.json",
 ).strip()
-RAG_EMBEDDING_PROVIDER = os.getenv(
-    "RAG_EMBEDDING_PROVIDER", "gemini"
-).strip().casefold()
-RAG_EMBEDDING_MODEL = os.getenv("RAG_EMBEDDING_MODEL", "").strip()
-RAG_EMBEDDING_DIMENSION = int(os.getenv("RAG_EMBEDDING_DIMENSION", "768"))
-RAG_TOP_K = int(os.getenv("RAG_TOP_K", "5"))
-RAG_MIN_SIMILARITY = float(os.getenv("RAG_MIN_SIMILARITY", "0.45"))
-RAG_MAX_CONTEXT_CHARS = int(os.getenv("RAG_MAX_CONTEXT_CHARS", "6000"))
-RAG_CHUNK_SIZE = int(os.getenv("RAG_CHUNK_SIZE", "1200"))
-RAG_CHUNK_OVERLAP = int(os.getenv("RAG_CHUNK_OVERLAP", "180"))
 
 # Product image recognition. V2 always reads the product catalog from DB.
 PRODUCTS_PATH = PROJECT_ROOT / "products.json"

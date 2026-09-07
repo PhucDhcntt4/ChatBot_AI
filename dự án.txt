@@ -37,7 +37,7 @@ một nhóm kiến thức để chatbot giải đáp chính sách.
 - Tải ảnh catalog, lưu metadata local_path trong PostgreSQL.
 - Tạo CLIP embedding ảnh và tìm kiếm bằng pgvector.
 - AI xác minh shortlist ảnh trước khi trả kết quả.
-- RAG cho TXT, Markdown và PDF có lớp văn bản.
+- Tra cứu kiến thức qua RAG Service độc lập; không tạo text embedding trong bot.
 - Redis context, giỏ hàng/đơn nháp, TTL và reset cache.
 - Lịch sử hội thoại lâu dài trong PostgreSQL.
 - Web chat, Telegram webhook và Facebook webhook.
@@ -53,7 +53,7 @@ Chưa nên xem là production-ready vì còn thiếu:
 - Hệ thống đơn hàng chính thức thay cho Google Sheets.
 - Monitoring, dashboard lỗi, alert và quy trình backup/restore đầy đủ.
 - Redis queue cho sự kiện Facebook khi chạy nhiều web replica.
-- Worker bền vững cho việc import knowledge.
+- Triển khai và giám sát RAG Service độc lập.
 - Bộ đánh giá chất lượng AI từ lịch sử hội thoại đã được nhân viên chấm.
 
 
@@ -79,7 +79,7 @@ Luồng chatbot:
              |
           Executor
        /      |       \
- PostgreSQL  Redis    RAG/pgvector
+ PostgreSQL  Redis    RAG Service (HTTP)
              |
           Presenter
              |
@@ -128,10 +128,10 @@ app/conversation/
   - image_service.py: điều phối ảnh.
 
 app/database/
-  Kết nối và repository PostgreSQL cho catalog, vector và knowledge.
+  Kết nối và repository PostgreSQL cho catalog, vector ảnh và hội thoại.
 
 app/knowledge/
-  Chia chunk, tạo text embedding và truy vấn RAG.
+  Chỉ giữ remote.py: adapter HTTP gọi API v1 của RAG Service.
 
 app/product_recognition/
   Phân loại ảnh, crop, CLIP embedding, vector retrieval và AI verification.
@@ -150,13 +150,13 @@ app/static/, app/templates/
   CSS, JavaScript, logo và giao diện quản trị.
 
 db_postgre/
-  Migration PostgreSQL theo thứ tự 001 đến 004.
+  Migration PostgreSQL theo thứ tự 001, 002, 004, 005 (003 RAG local đã bỏ).
 
 data/product_images/
   Ảnh catalog tải về local, phục vụ embedding và xác minh ảnh.
 
 knowledge/
-  File nguồn của hệ thống RAG.
+  Tài liệu local cũ chỉ giữ để đối chiếu; phí vận chuyển đọc qua API RAG Service.
 
 prompts/
   Instruction nghiệp vụ, dữ liệu promotion, ảnh, CTA và phản hồi nhanh.
@@ -277,7 +277,7 @@ lỗi xuất Sheets không được làm mất context đơn.
 PostgreSQL:
 
 - Catalog sản phẩm, variant, màu, thuộc tính và ảnh.
-- Image embedding và knowledge embedding.
+- Image embedding trong bot; knowledge embedding tại RAG Service.
 - Lịch sử hội thoại lâu dài.
 - Dữ liệu dùng cho trang quản trị.
 
@@ -292,7 +292,7 @@ Redis:
 Local disk:
 
 - data/product_images chứa ảnh nguồn cho CLIP/verification.
-- knowledge chứa file tài liệu nguồn.
+- knowledge giữ tài liệu cũ và file vận chuyển đang dùng tính phí.
 - prompts chứa hướng dẫn AI.
 - secrets chứa credential cục bộ và không được commit.
 
@@ -332,10 +332,11 @@ JSON:
 - Bật extension vector.
 - Tạo product_image_embeddings với vector(512).
 
-003_customer_care_rag.sql:
+RAG local (migration 003) đã được loại bỏ:
 
-- knowledge_documents
-- knowledge_chunks với vector(768).
+- Không tạo knowledge_documents/knowledge_chunks trong DB bot.
+- RAG Service quản lý database/schema riêng; giữ vector cho embedding ảnh sản phẩm.
+- Giữ conversation_messages.rag_sources để lưu nguồn RAG trong lịch sử hội thoại.
 
 004_conversation_history.sql:
 
@@ -403,34 +404,28 @@ Không nên giao toàn bộ tính đúng đắn nghiệp vụ cho prompt.
 11. RAG KNOWLEDGE
 =================
 
-Nguồn hỗ trợ:
+Bot chỉ gọi POST /api/v1/knowledge/search qua app/knowledge/remote.py.
+RAG Service sở hữu tài liệu, chia đoạn, embedding và tìm kiếm.
+API trả success/status/content/sources; bot giữ planner, instruction và presenter.
 
-- TXT.
-- Markdown.
-- PDF có thể trích xuất văn bản.
+Cấu hình bot: RAG_ENABLED, RAG_SERVICE_URL, RAG_SERVICE_API_KEY,
+RAG_SERVICE_TIMEOUT_SECONDS. Hội thoại dùng SEARCH_API_KEY.
+Trang quản lý dùng RAG_SERVICE_ADMIN_API_KEY (= ADMIN_API_KEY), giữ ở backend;
+RAG_SERVICE_ADMIN_TIMEOUT_SECONDS mặc định 180 giây cho upload.
+Không còn tạo/query text vector hoặc import Knowledge tại database của bot.
 
-Pipeline:
+/admin/knowledge giữ nguyên giao diện upload/chọn nhóm/danh sách/modal/xóa.
+API backend chuyển tiếp tới service, không đọc/ghi Knowledge DB nội bộ.
+Upload chờ service hoàn tất; không job polling, không tự retry mutation khi timeout.
+Key không xuất hiện trong HTML/JS/URL. Nhân viên vẫn đăng nhập trang bot.
+File trùng tên được thêm với source_key riêng; không âm thầm thay tài liệu khác.
+Các nhóm store, warranty, returns, shipping, size_guide... phải khớp planner.
+Lỗi HTTP/timeout trả knowledge_service_unavailable; không fallback kho cũ.
+Lượt cần RAG mà service lỗi không tiếp tục cập nhật/chốt đơn hoặc thêm CTA.
 
-  File -> extract text -> chunk -> document embedding -> PostgreSQL/pgvector
-       -> query embedding -> similarity search -> context cho Executor/Presenter
-
-Các nhóm hiện có thể bao gồm warranty, returns, shipping, size_guide, store,
-promotion và collections_link. Category do người quản trị nhập, không bắt buộc
-phải nằm trong thư mục uploads.
-
-Provider/model/dimension của query phải khớp embedding đã import. Ví dụ tài liệu
-được tạo bằng Gemini embedding sẽ không thể truy vấn đúng bằng OpenAI embedding
-nếu chưa re-embed. SQL hiện dùng vector 768.
-
-Trang Knowledge có thể:
-
-- Tải tài liệu và tạo embedding.
-- Xem danh sách/chunk/model/trạng thái.
-- Mở modal xem nội dung.
-- Xóa tài liệu đồng bộ.
-
-Job import Knowledge hiện là background task trong FastAPI. Đây là giới hạn cần
-tách worker trước khi chạy production tải lớn.
+Migration tạo RAG local đã bỏ. Khi dọn môi trường cũ, sao lưu trước khi xóa đúng
+public.knowledge_chunks/public.knowledge_documents; không xóa database/schema của RAG Service.
+Phí vận chuyển đọc nội dung qua API theo SHIPPING_POLICY_DOCUMENT_ID, không dùng file local.
 
 
 12. ĐỒNG BỘ SẢN PHẨM VÀ WORKER
@@ -582,7 +577,7 @@ khuyến mãi được áp dụng, promotion note cần giữ tên chương trì
 
 /admin/knowledge:
 
-- Upload, embedding, xem nội dung và xóa tài liệu.
+- Giữ giao diện cũ. Các API thêm/xem/xóa gọi RAG Service qua backend bot.
 
 /admin/prompts:
 
@@ -641,8 +636,8 @@ Admin product:
 - POST /admin/products/api/jobs/{job_id}/cancel
 - GET  /admin/products/api/catalog
 
-Admin Knowledge, Prompt và Conversation có API danh sách, chi tiết, lưu/xóa và
-Human mode tương ứng. Swagger tại /docs là nguồn kiểm tra payload chính xác.
+Admin Prompt và Conversation có API danh sách, chi tiết, lưu/xóa và Human mode.
+Knowledge giữ UI, backend gọi API service. Endpoint job cũ trả 410. Swagger tại /docs là nguồn kiểm tra payload chính xác.
 
 
 19. CẤU HÌNH MÔI TRƯỜNG QUAN TRỌNG
@@ -689,11 +684,11 @@ Conversation:
 RAG:
 
 - RAG_ENABLED
-- RAG_EMBEDDING_PROVIDER
-- RAG_EMBEDDING_MODEL
-- RAG_EMBEDDING_DIMENSION
-- RAG_TOP_K
-- RAG_MIN_SIMILARITY
+- RAG_SERVICE_URL
+- RAG_SERVICE_API_KEY (SEARCH_API_KEY của service)
+- RAG_SERVICE_TIMEOUT_SECONDS
+- RAG_SERVICE_ADMIN_API_KEY
+- RAG_SERVICE_ADMIN_TIMEOUT_SECONDS
 
 Image vector:
 
@@ -774,7 +769,7 @@ JSON/structured đến dịch vụ tập trung thay vì chỉ giữ file local.
 cảnh báo/lỗi và một dòng BOT RESPONSE có timing cho mỗi phản hồi. LOG_LEVEL=DEBUG
 dùng khi cần xem chi tiết Planner, Executor, RAG, vector, webhook và lưu lịch sử.
 - CHANNEL SENT/RESPONSE.
-- RAG SEARCH.
+- RAG REMOTE.
 - Product sync job/worker.
 
 
@@ -793,10 +788,10 @@ Worker không chạy job:
 - API và worker có dùng cùng Redis.
 - Kiểm tra queue/processing/job key và stale recovery.
 
-RAG không trả sau khi đổi OpenAI/Gemini:
+RAG không trả:
 
-- Provider/model/dimension query không khớp document embedding.
-- Re-import/re-embed knowledge bằng provider mới.
+- Kiểm tra URL/cổng, SEARCH_API_KEY, timeout và log RAG REMOTE.
+- Kiểm tra category/tài liệu đã lập chỉ mục bên service; đổi AI của bot không đổi embedding.
 
 Nhận diện ảnh sai:
 
@@ -863,7 +858,7 @@ Giới hạn scale hiện tại:
 
 - Facebook event queue theo recipient nằm trong RAM của web process. Trước khi
   chuyển sang Redis queue hoặc có sticky routing, chỉ nên chạy một web worker.
-- Knowledge import chạy background trong FastAPI.
+- Knowledge import chờ RAG Service xử lý; cần timeout proxy phù hợp.
 - CLIP model tốn RAM; web và worker cần sizing tài nguyên riêng.
 - Local image storage cần shared volume/object storage nếu chạy nhiều máy.
 
@@ -879,7 +874,7 @@ Giới hạn scale hiện tại:
 
 Ưu tiên 2 — Độ bền:
 
-- Knowledge worker qua Redis.
+- Theo dõi thời gian và giới hạn tải của RAG Service khi import tài liệu lớn.
 - Facebook inbound queue qua Redis.
 - Outbox/order persistence trước Google Sheets.
 - Idempotency toàn bộ webhook và export.

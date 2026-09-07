@@ -27,6 +27,12 @@ class ConversationPresenter:
         result: ExecutionResult,
         context: ConversationContext,
     ) -> str:
+        if result.status == "knowledge_service_unavailable":
+            return (
+                "Dạ, hệ thống tra cứu thông tin đang tạm gián đoạn. "
+                "Anh/chị vui lòng thử lại sau ít phút ạ."
+            )
+
         if self._has_insufficient_knowledge(plan, result):
             return self.INSUFFICIENT_KNOWLEDGE_REPLY
         reply = self.naturalize_acknowledgement(

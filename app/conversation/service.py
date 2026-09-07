@@ -209,9 +209,11 @@ class ConversationService:
 
         execution_started = perf_counter()
         result = self.executor.execute(message, plan, context)
-        self.order_flow.apply(plan, result, context)
-        self._export_confirmed_order(result, context)
-        self.cta.apply(plan, result, context)
+
+        if result.status != "knowledge_service_unavailable":
+            self.order_flow.apply(plan, result, context)
+            self._export_confirmed_order(result, context)
+            self.cta.apply(plan, result, context)
         execution_seconds = perf_counter() - execution_started
         logger.debug(
             "V2 EXECUTE session=%s status=%s products=%s media=%s "

@@ -32,7 +32,7 @@
       <header class="page-head">
         <h1>Quản lý Knowledge</h1>
         <p>
-          Tải tài liệu, tạo embedding và theo dõi dữ liệu RAG trong PostgreSQL.
+          Thêm, xem và xóa tài liệu tại đây. Dữ liệu được lưu và xử lý bởi RAG Service.
         </p>
       </header>
       <main class="page-content">
@@ -106,16 +106,17 @@
               </div>
               <label for="knowledgeCategory">Nhóm tài liệu</label>
               <select id="knowledgeCategory" required>
-                <option value="customer_care">customer_care</option>
-                <option value="product_info">product_info</option>
-                <option value="shipping">shipping</option>
-                <option value="return_policy">return_policy</option>
-                <option value="promotion">promotion</option>
-                <option value="faq">faq</option>
-                <option value="__new__">+ Tạo nhóm mới</option>
+                <option value="store">Cửa hàng</option>
+                <option value="size_guide">Hướng dẫn chọn size</option>
+                <option value="warranty">Bảo hành</option>
+                <option value="returns">Đổi trả</option>
+                <option value="shipping">Giao hàng</option>
+                <option value="promotion">Khuyến mãi</option>
+                <option value="customer_care">Chăm sóc khách hàng</option>
+                <option value="custom">Nhóm khác…</option>
               </select>
               <div class="new-category-field" id="newCategoryField" hidden>
-                <label for="newKnowledgeCategory">Tên nhóm mới</label>
+                <label for="newKnowledgeCategory">Mã nhóm</label>
                 <input
                   id="newKnowledgeCategory"
                   type="text"
@@ -237,7 +238,7 @@
 
     <script src="/static/js/admin_base.js?v=20260904-environment2"></script>
     <script
-      src="/static/js/knowledge_admin.js?v=20260903-category-select1"
+      src="/static/js/knowledge_admin.js?v=20260907-rag-categories2"
       defer
     ></script>
   </body>

@@ -1,9 +1,11 @@
 from contextlib import asynccontextmanager
 import logging
+import math
+import httpx # type: ignore
 from pathlib import Path
 from time import perf_counter
 from uuid import uuid4
-
+from app.knowledge.remote import RemoteKnowledgeSearch
 from fastapi import FastAPI, File, Form, HTTPException, Request, UploadFile # type: ignore
 from fastapi.responses import RedirectResponse# type: ignore
 from fastapi.staticfiles import StaticFiles# type: ignore
@@ -19,6 +21,9 @@ from app.config import (
     RAG_ENABLED,
     TELEGRAM_CHAT_CHANNEL,
     WEB_CHAT_CHANNEL,
+    RAG_SERVICE_URL,
+    RAG_SERVICE_API_KEY,
+    RAG_SERVICE_TIMEOUT_SECONDS,
 )
 from app.conversation.context import conversation_context_store
 from app.conversation.executor import ConversationExecutor
@@ -50,28 +55,79 @@ STATIC_DIR = Path(__file__).resolve().parent / "static"
 def create_knowledge_search():
     if not RAG_ENABLED:
         return None
-    from app.knowledge.service import KnowledgeSearchService
 
-    service = KnowledgeSearchService()
-    matching_documents = service.matching_document_count()
-    logger.info(
-        "RAG V2 ready provider=%s model=%s dimension=%s documents=%s",
-        service.embedding_service.provider_name,
-        service.embedding_service.model,
-        service.embedding_service.dimension,
-        matching_documents,
-    )
-    if matching_documents == 0:
-        logger.warning(
-            "RAG INDEX MISMATCH: no active knowledge document matches "
-            "provider=%s model=%s dimension=%s. Configure the original "
-            "embedding model or re-import knowledge documents.",
-            service.embedding_service.provider_name,
-            service.embedding_service.model,
-            service.embedding_service.dimension,
+    if not RAG_SERVICE_URL or not RAG_SERVICE_API_KEY:
+        raise RuntimeError(
+            "Thiếu RAG_SERVICE_URL hoặc RAG_SERVICE_API_KEY trong .env"
         )
-    return service.search
 
+    if (
+        not math.isfinite(RAG_SERVICE_TIMEOUT_SECONDS)
+        or RAG_SERVICE_TIMEOUT_SECONDS <= 0
+    ):
+        raise RuntimeError(
+            "RAG_SERVICE_TIMEOUT_SECONDS phải là số dương hữu hạn"
+        )
+
+    service_url = httpx.URL(RAG_SERVICE_URL)
+    if service_url.scheme not in {"http", "https"} or not service_url.host:
+        raise RuntimeError(
+            "RAG_SERVICE_URL phải là địa chỉ HTTP hoặc HTTPS hợp lệ"
+        )
+
+    logger.info(
+        "RAG backend=remote configured timeout=%.1fs",
+        RAG_SERVICE_TIMEOUT_SECONDS,
+    )
+
+    def search(question, *, categories=None):
+        started = perf_counter()
+        remote = None
+
+        try:
+            remote = RemoteKnowledgeSearch(
+                base_url=RAG_SERVICE_URL,
+                api_key=RAG_SERVICE_API_KEY,
+                timeout=RAG_SERVICE_TIMEOUT_SECONDS,
+            )
+
+            result = remote.search(
+                question,
+                categories=categories,
+            )
+
+            logger.info(
+                "RAG REMOTE status=%s sources=%s time=%.3fs",
+                result.get("status"),
+                len(result.get("sources") or []),
+                perf_counter() - started,
+            )
+
+            return result
+
+        except (httpx.HTTPError, ValueError) as error:
+            response = getattr(error, "response", None)
+
+            logger.warning(
+                "RAG REMOTE status=unavailable error=%s "
+                "http_status=%s time=%.3fs",
+                type(error).__name__,
+                getattr(response, "status_code", None),
+                perf_counter() - started,
+            )
+
+            return {
+                "success": False,
+                "status": "knowledge_service_unavailable",
+                "content": "",
+                "sources": [],
+            }
+
+        finally:
+            if remote is not None:
+                remote.close()
+
+    return search
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):

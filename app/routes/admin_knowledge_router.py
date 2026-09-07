@@ -1,14 +1,13 @@
+"""Keep the bot's Knowledge UI; document data is owned exclusively by RAG Service."""
 from pathlib import Path
+import re
+from urllib.parse import urlsplit
+from uuid import uuid4
 
-from fastapi import APIRouter, BackgroundTasks, File, Form, HTTPException, UploadFile
+from fastapi import APIRouter, Depends, File, Form, HTTPException, Path as PathParam, Request, UploadFile
 from fastapi.responses import HTMLResponse
 
-from app.database.knowledge_repository import KnowledgeRepository
-from app.services.knowledge_admin_service import (
-    delete_source_file,
-    knowledge_import_manager,
-    safe_filename,
-)
+from app.knowledge.admin_client import admin_client
 
 
 router = APIRouter(prefix="/admin/knowledge", tags=["Knowledge Admin"])
@@ -16,81 +15,64 @@ PAGE_PATH = Path(__file__).resolve().parent.parent / "static" / "knowledge_admin
 MAX_UPLOAD_BYTES = 10 * 1024 * 1024
 
 
+def get_client():
+    with admin_client() as client:
+        yield client
+
+
+def same_origin(request: Request):
+    # Cookie-authenticated writes must not originate from another website.
+    origin = request.headers.get("origin") or request.headers.get("referer")
+    if origin:
+        supplied = urlsplit(origin)
+        target = urlsplit(str(request.base_url))
+        if supplied.scheme != target.scheme or supplied.netloc != target.netloc:
+            raise HTTPException(403, "Nguồn yêu cầu không hợp lệ")
+    elif request.headers.get("sec-fetch-site") == "cross-site":
+        raise HTTPException(403, "Nguồn yêu cầu không hợp lệ")
+
+
 @router.get("", response_class=HTMLResponse)
 def page():
-    return HTMLResponse(
-        PAGE_PATH.read_text(encoding="utf-8"),
-        headers={"Cache-Control": "no-store"},
-    )
+    return HTMLResponse(PAGE_PATH.read_text(encoding="utf-8"), headers={"Cache-Control": "no-store"})
 
 
 @router.get("/api/documents")
-def documents():
-    items = KnowledgeRepository().list_documents()
-    for item in items:
-        for key in ("created_at", "updated_at"):
-            if item.get(key):
-                item[key] = item[key].isoformat()
-    return {"total": len(items), "documents": items}
+def documents(client=Depends(get_client)):
+    return client.documents()
 
 
 @router.get("/api/documents/{document_id}")
-def document_detail(document_id: int):
-    item = KnowledgeRepository().get_document(document_id)
-    if not item:
-        raise HTTPException(status_code=404, detail="Không tìm thấy tài liệu")
-    for key in ("created_at", "updated_at"):
-        if item.get(key):
-            item[key] = item[key].isoformat()
-    return item
+def document_detail(document_id: int = PathParam(gt=0), client=Depends(get_client)):
+    return client.detail(document_id)
 
 
-@router.delete("/api/documents/{document_id}")
-def delete_document(document_id: int):
-    deleted = KnowledgeRepository().delete_document(document_id)
-    if not deleted:
-        raise HTTPException(status_code=404, detail="Không tìm thấy tài liệu")
+@router.delete("/api/documents/{document_id}", dependencies=[Depends(same_origin)])
+def delete_document(document_id: int = PathParam(gt=0), client=Depends(get_client)):
+    return client.delete(document_id)
+
+
+@router.post("/api/upload", dependencies=[Depends(same_origin)])
+def upload(file: UploadFile = File(...), category: str = Form("customer_care"), client=Depends(get_client)):
     try:
-        file_deleted = delete_source_file(deleted["source_key"])
-    except (OSError, ValueError) as error:
-        # The RAG record is already removed. Return the filesystem warning so
-        # the administrator knows an orphan source file may remain.
-        return {
-            "success": True,
-            "document": deleted,
-            "file_deleted": False,
-            "warning": str(error),
-        }
-    return {
-        "success": True,
-        "document": deleted,
-        "file_deleted": file_deleted,
-    }
-
-
-@router.post("/api/upload")
-async def upload(
-    background_tasks: BackgroundTasks,
-    file: UploadFile = File(...),
-    category: str = Form("customer_care"),
-):
-    try:
-        filename = safe_filename(file.filename or "")
-        job = knowledge_import_manager.create(filename, category)
-    except ValueError as error:
-        raise HTTPException(status_code=422, detail=str(error)) from error
-    content = await file.read(MAX_UPLOAD_BYTES + 1)
-    if not content:
-        raise HTTPException(status_code=422, detail="Tài liệu không có dữ liệu")
-    if len(content) > MAX_UPLOAD_BYTES:
-        raise HTTPException(status_code=413, detail="Tài liệu vượt quá 10 MB")
-    background_tasks.add_task(knowledge_import_manager.run, job.id, content)
-    return job.public()
+        filename = re.split(r"[/\\]", file.filename or "")[-1].strip()
+        if (not filename or len(filename) > 500 or "\x00" in filename
+                or Path(filename).suffix.lower() not in {".txt", ".md", ".pdf"}):
+            raise HTTPException(422, "Chỉ hỗ trợ tài liệu TXT, Markdown, PDF có tên hợp lệ.")
+        category = re.sub(r"\s+", "_", category.strip().casefold())
+        if not re.fullmatch(r"[a-z0-9][a-z0-9_-]{0,99}", category):
+            raise HTTPException(422, "Tên nhóm chỉ dùng chữ không dấu, số, dấu gạch ngang hoặc gạch dưới.")
+        content = file.file.read(MAX_UPLOAD_BYTES + 1)
+        if not content:
+            raise HTTPException(422, "Tài liệu không có dữ liệu")
+        if len(content) > MAX_UPLOAD_BYTES:
+            raise HTTPException(413, "Tài liệu vượt quá 10 MB")
+        # Add means add: a same-named upload cannot silently replace another service document.
+        return client.upload(filename, content, category, f"bot_upload/{uuid4().hex}")
+    finally:
+        file.file.close()
 
 
 @router.get("/api/jobs/{job_id}")
-def job(job_id: str):
-    result = knowledge_import_manager.get(job_id)
-    if not result:
-        raise HTTPException(status_code=404, detail="Không tìm thấy tác vụ")
-    return result
+def retired_job(job_id: str):
+    raise HTTPException(410, "Upload hiện chờ kết quả trực tiếp từ RAG Service. Hãy tải lại trang.")

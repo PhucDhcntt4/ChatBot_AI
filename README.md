@@ -33,7 +33,7 @@ Web / Telegram / Facebook
  Planner → Executor → Presenter
     │          │          │
     │          ├─ PostgreSQL catalog
-    │          ├─ PostgreSQL + pgvector RAG
+    │          ├─ RAG Service qua HTTP (service sở hữu tài liệu và vector)
     │          ├─ Redis conversation/order draft
     │          └─ Google Sheets export
     └─ Gemini hoặc OpenAI
@@ -92,7 +92,6 @@ Tạo database, bật pgvector, sau đó chạy theo đúng thứ tự:
 ```powershell
 psql "$env:DATABASE_URL" -f db_postgre/001_product_catalog.sql
 psql "$env:DATABASE_URL" -f db_postgre/002_product_image_embeddings.sql
-psql "$env:DATABASE_URL" -f db_postgre/003_customer_care_rag.sql
 psql "$env:DATABASE_URL" -f db_postgre/004_conversation_history.sql
 psql "$env:DATABASE_URL" -f db_postgre/005_admin_users.sql
 ```
@@ -151,13 +150,14 @@ VECTOR_AUTO_ACCEPT_SIMILARITY=0.96
 VECTOR_MIN_MARGIN=0.08
 VECTOR_MAX_CANDIDATES=3
 
-# RAG — phải khớp với embedding đã lưu trong DB
+# RAG Service (ví dụ bot 8000, service 8001; dùng đúng cổng thực tế)
 RAG_ENABLED=true
-RAG_EMBEDDING_PROVIDER=gemini
-RAG_EMBEDDING_MODEL=gemini-embedding-001
-RAG_EMBEDDING_DIMENSION=768
-RAG_TOP_K=5
-RAG_MIN_SIMILARITY=0.45
+RAG_SERVICE_URL=http://127.0.0.1:8001
+RAG_SERVICE_API_KEY=DIEN_SEARCH_API_KEY_CUA_RAG_SERVICE
+RAG_SERVICE_TIMEOUT_SECONDS=40
+# Backend Knowledge UI: ADMIN_API_KEY của service, không gửi xuống trình duyệt
+RAG_SERVICE_ADMIN_API_KEY=DIEN_ADMIN_API_KEY_CUA_RAG_SERVICE
+RAG_SERVICE_ADMIN_TIMEOUT_SECONDS=180
 
 # Google Sheets — tùy chọn
 GOOGLE_SHEETS_ENABLED=false
@@ -298,9 +298,19 @@ Giới hạn nhập danh sách trực tiếp/Excel là 1.000 SKU mỗi lần. Đ
 
 ## Knowledge và prompt
 
-- Trang Knowledge nhận TXT, Markdown và PDF có lớp văn bản.
-- Khi đổi provider/model/dimension của RAG, phải import hoặc tạo embedding lại tài liệu.
-- `003_customer_care_rag.sql` hiện dùng vector 768 chiều; đổi dimension cần migration schema tương ứng.
+- Bot chỉ gọi `POST /api/v1/knowledge/search` của RAG Service; không có backend RAG nội bộ hoặc fallback về database cũ.
+- `/admin/knowledge` giữ giao diện upload, nhóm tài liệu, danh sách, xem chi tiết và xóa ngay trong bot. Backend gọi API RAG Service, không chuyển trang.
+- Bot dùng RAG_SERVICE_API_KEY (= SEARCH_API_KEY) cho hội thoại; RAG_SERVICE_ADMIN_API_KEY (= ADMIN_API_KEY) chỉ cho backend quản lý tài liệu. Không gửi key xuống HTML/JS hoặc URL.
+- Các API `/admin/knowledge/api/documents`, `/api/upload` và xóa được giữ URL nhưng chuyển tiếp tới RAG Service. Chỉ endpoint job import cũ trả 410.
+- Upload chờ service hoàn tất rồi thông báo và bỏ chọn file. Không tạo job/embedding hay lưu tài liệu vào DB bot; không tự retry khi timeout. Tải lại danh sách để kiểm tra trước khi gửi lại. Thêm file trùng tên tạo tài liệu mới, không âm thầm ghi đè tài liệu cũ.
+- Danh sách theo các trang 200 bản ghi của service, tối đa dưới 10.000 bản ghi; nếu vượt giới hạn sẽ báo lỗi rõ ràng, không hiển thị danh sách bị cắt mà không thông báo.
+- Model embedding, chia đoạn và ngưỡng tìm kiếm cấu hình tại RAG Service, không phải bot.
+- Migration tạo RAG local (003) đã được loại bỏ; bot không cần `public.knowledge_documents`/`public.knowledge_chunks`. Giữ extension `vector` cho ảnh sản phẩm và `conversation_messages.rag_sources` cho lịch sử nguồn từ RAG Service.
+- Phí vận chuyển đọc tài liệu qua API theo `SHIPPING_POLICY_DOCUMENT_ID`, dùng key quản trị ở backend; `knowledge/shipping/Dat_Hang_Van_Chuyen.txt` chỉ còn là bản đối chiếu.
+- Nếu service lỗi, bot không quay về kho cũ và không tiếp tục chốt đơn/CTA trong lượt cần tra cứu.
+- Chạy RAG ở cổng riêng, nhập tài liệu, đặt RAG_SERVICE_URL và key rồi restart bot. Ví dụ tài liệu dùng bot 8000/service 8001; nếu service đang ở 8000 thì giữ URL đó và chạy bot ở cổng khác.
+- URL service chỉ cần truy cập được từ backend bot. Trình duyệt nhân viên chỉ gọi cùng origin của bot; không cần CORS hoặc truy cập trực tiếp RAG Service. Giữ đăng nhập quản trị bật và TLS khi triển khai.
+- Kiểm tra log `RAG REMOTE status=knowledge_found`; 401: key, 503: service/DB/Gemini, knowledge_not_found: tài liệu/category.
 - `prompts/instruction.txt` là prompt nghiệp vụ duy nhất: vai trò, cách tư vấn,
   flow bán hàng và format phản hồi. Người quản trị không cần biết tên intent/tool.
 - Hợp đồng kỹ thuật Planner/Presenter nằm trong `app/ai/internal_prompts/`, không
@@ -355,7 +365,7 @@ Trạng thái gần nhất ngày 28/08/2026: `147` test đã chạy thành công
 - Chạy migration `005_admin_users.sql`, tạo ít nhất một user quản trị, bật `ADMIN_AUTH_ENABLED=true`, đặt session secret riêng và `ADMIN_COOKIE_SECURE=true` trước khi public. User được lưu trong PostgreSQL; chỉ role `admin` được quản lý tài khoản. Các trang nghiệp vụ còn lại chưa giới hạn riêng giữa `manager` và `staff`.
 - Thêm rate limit, request size limit, timeout, retry có kiểm soát và cảnh báo lỗi AI/API.
 - Hiện hàng đợi sự kiện Facebook theo người dùng nằm trong bộ nhớ process; để scale nhiều web worker/replica cần chuyển phần này sang Redis hoặc bảo đảm sticky routing. Trước khi làm việc đó nên chạy một web worker.
-- Job upload Knowledge hiện dùng background task trong FastAPI; production nên tách sang worker bền vững.
+- Vận hành RAG Service như dịch vụ riêng: TLS, giới hạn truy cập, backup và giám sát theo tài liệu của service.
 - Google Sheets là kênh bàn giao đơn cho nhân viên, không nên là hệ thống quản trị đơn hàng duy nhất.
 - Logic khuyến mãi hiện là kết quả AI/đơn nháp và vẫn cần nhân viên kiểm tra trước khi tạo đơn chính thức.
 
@@ -367,7 +377,7 @@ app/
   channels/              Web/Telegram/Facebook providers
   conversation/          Planner, Executor, Presenter, order flow
   database/              PostgreSQL repositories
-  knowledge/             RAG embedding và retrieval
+  knowledge/             Adapter HTTP gọi RAG Service
   product_recognition/   CLIP, vector search, AI verification
   ai/internal_prompts/   Hợp đồng kỹ thuật Planner/Presenter, không chỉnh nghiệp vụ
   routes/                 API và trang quản trị
@@ -377,7 +387,7 @@ app/
   templates/              Giao diện admin
 db_postgre/               4 migration SQL
 data/product_images/      Ảnh catalog local
-knowledge/                Tài liệu nguồn RAG
+knowledge/                Bản tài liệu local cũ để đối chiếu, không dùng runtime
 prompts/                  Instruction nghiệp vụ và cấu hình nội dung có thể quản trị
 tests/                    Unit/integration-style tests
 ```
@@ -386,7 +396,7 @@ tests/                    Unit/integration-style tests
 
 - Worker không in thêm log: hàng đợi Redis đang trống, đây không phải lỗi.
 - Giao diện đồng bộ polling mãi: kiểm tra worker, Redis và key job trong Redis.
-- RAG không tìm thấy sau khi đổi AI provider: embedding query không khớp provider/model/dimension của tài liệu đã index; cần re-embed.
+- RAG không tìm thấy: kiểm tra tài liệu/category/trạng thái bên service. Đổi AI viết câu trả lời ở bot không đổi embedding của service.
 - Ảnh không nhận diện: kiểm tra `product_images.local_path`, file local và `product_image_embeddings`.
 - Ảnh gửi khách 404: kiểm tra `source_url` CDN Shopify trong DB; chatbot không dùng local path làm URL gửi khách.
 - Google Sheets lỗi 429/503: service có retry, nhưng vẫn cần kiểm tra quota, quyền chia sẻ sheet và service account.

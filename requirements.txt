@@ -24,9 +24,8 @@ open-clip-torch==3.3.0
 torch==2.13.0
 torchvision==0.28.0
 
-# Import Excel và tài liệu Knowledge
+# Import Excel (tài liệu Knowledge được xử lý tại RAG Service)
 openpyxl==3.1.5
-pypdf==6.15.0
 
 # Xuất đơn hàng sang Google Sheets
 google-api-python-client==2.197.0
