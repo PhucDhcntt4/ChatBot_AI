@@ -7,7 +7,10 @@ from google import genai
 from google.genai import types # type: ignore
 from PIL import Image, UnidentifiedImageError
 
-from app.config import PRODUCT_RECOGNITION_PROMPT_PATH
+from app.config import (
+    PRODUCT_RECOGNITION_PROMPT_PATH,
+    PRODUCT_VECTOR_VERIFICATION_PROMPT_PATH,
+)
 from app.product_recognition.catalog_service import (
     ProductCatalogService,
 )
@@ -38,6 +41,11 @@ class ProductRecognitionService:
         self.catalog = catalog
         self.prompt = PRODUCT_RECOGNITION_PROMPT_PATH.read_text(
             encoding="utf-8"
+        )
+        self.vector_verification_prompt = (
+            PRODUCT_VECTOR_VERIFICATION_PROMPT_PATH.read_text(
+                encoding="utf-8"
+            )
         )
         self._image_cache: dict[str, tuple[bytes, str]] = {}
         self._cache_lock = threading.Lock()
@@ -292,7 +300,7 @@ class ProductRecognitionService:
         original_image_bytes: bytes | None = None,
         original_mime_type: str | None = None,
     ) -> VectorCandidateVerification:
-        """Gemini xác minh một lần trên shortlist từ pgvector."""
+        """Gemini xác minh một lần trên shortlist từ Qdrant."""
 
         allowed_codes = {
             str(code).strip().upper()
@@ -306,27 +314,12 @@ class ProductRecognitionService:
             image_bytes
         )
 
+        verification_instruction = self.vector_verification_prompt.replace(
+            "{{ALLOWED_CODES}}",
+            json.dumps(sorted(allowed_codes), ensure_ascii=False),
+        )
         contents: list = [
-            (
-                "Hãy xác minh CUSTOMER IMAGE với các sản phẩm "
-                "ứng viên do hệ thống tìm kiếm ảnh cung cấp. "
-                "So sánh chi tiết hình dáng, thân, nắp, quai, "
-                "khóa, logo, đường may, mũi, đế, gót và trang trí. "
-                "Bỏ qua phông nền, người mẫu và chữ quảng cáo. "
-                "Tuy nhiên, nếu CUSTOMER ORIGINAL và một REFERENCE là "
-                "cùng một bức ảnh hoặc cùng cảnh chụp, chỉ khác do "
-                "crop, resize hoặc nén, thì đó là bằng chứng quyết định "
-                "cho product_code của REFERENCE đó. Không được chọn "
-                "mẫu khác chỉ vì cùng có phụ kiện hình con vật; "
-                "phải ưu tiên cấu trúc thân túi, nắp, miệng túi, "
-                "vị trí quai, khóa và đường may. "
-                "Màu hoặc góc chụp khác nhau không có nghĩa là "
-                "khác mẫu. Chỉ chọn một product_code khi có đủ "
-                "chi tiết đặc trưng trùng khớp. Nếu không ứng viên "
-                "nào khớp rõ, trả exact_match=false, product_code=null. "
-                "Không được trả mã ngoài danh sách: "
-                f"{sorted(allowed_codes)}."
-            ),
+            verification_instruction,
             "CUSTOMER CROPPED IMAGE:",
             types.Part.from_bytes(
                 data=customer_bytes,
@@ -440,7 +433,6 @@ class ProductRecognitionService:
                 (
                     f"CANDIDATE product_code={code}; "
                     f"color={row.get('color') or ''}; "
-                    f"vector_similarity={float(row.get('similarity') or 0):.4f}; "
                     f"reference={loaded_per_code[code]}"
                 ),
                 types.Part.from_bytes(

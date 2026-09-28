@@ -1,40 +1,57 @@
 import re
 import unicodedata
+from time import monotonic
 
-from fastapi import HTTPException # type: ignore
+from fastapi import HTTPException  # type: ignore
 
-from app.config import SHIPPING_POLICY_DOCUMENT_ID
+from app.config import (
+    SHIPPING_POLICY_CACHE_SECONDS,
+    SHIPPING_POLICY_CATEGORY,
+)
 from app.knowledge.admin_client import admin_client
 
 
 class ShippingPolicyService:
-    """Đọc tài liệu qua API, giữ nguyên cách phân tích phí."""
+    """Read complete active shipping documents through the RAG administration API."""
+
+    def __init__(self) -> None:
+        self._cached_content: str | None = None
+        self._cache_expires_at = 0.0
 
     def _read_content(self) -> str:
-        if SHIPPING_POLICY_DOCUMENT_ID <= 0:
+        now = monotonic()
+        if (
+            self._cached_content is not None
+            and now < self._cache_expires_at
+        ):
+            return self._cached_content
+
+        if not SHIPPING_POLICY_CATEGORY:
             raise HTTPException(
                 status_code=503,
-                detail="Chưa cấu hình ID tài liệu vận chuyển.",
+                detail="Chua cau hinh nhom tai lieu van chuyen.",
             )
 
         with admin_client() as client:
-            document = client.detail(SHIPPING_POLICY_DOCUMENT_ID)
-
-        if document.get("is_active") is not True:
-            raise HTTPException(
-                status_code=503,
-                detail="Tài liệu vận chuyển đang bị tắt.",
+            documents = client.details_by_category(
+                SHIPPING_POLICY_CATEGORY
             )
 
-        # Client hiện có đã đổi source_text của API thành content.
-        content = document.get("content")
-
-        if not isinstance(content, str) or not content.strip():
+        contents = [
+            document["content"].strip()
+            for document in documents
+            if isinstance(document.get("content"), str)
+            and document["content"].strip()
+        ]
+        if not contents:
             raise HTTPException(
                 status_code=503,
-                detail="Tài liệu vận chuyển không có nội dung.",
+                detail="Nhom tai lieu van chuyen khong co noi dung.",
             )
 
+        content = "\n\n".join(contents)
+        self._cached_content = content
+        self._cache_expires_at = now + SHIPPING_POLICY_CACHE_SECONDS
         return content
 
     @staticmethod
@@ -44,7 +61,7 @@ class ShippingPolicyService:
             character
             for character in value
             if unicodedata.category(character) != "Mn"
-        ).replace("đ", "d")
+        ).replace("\u0111", "d")
 
     @staticmethod
     def _amount(line: str) -> int | None:
@@ -89,5 +106,5 @@ class ShippingPolicyService:
 
         raise HTTPException(
             status_code=503,
-            detail="Không đọc được phí tiêu chuẩn trong tài liệu vận chuyển.",
+            detail="Khong doc duoc phi tieu chuan trong tai lieu van chuyen.",
         )

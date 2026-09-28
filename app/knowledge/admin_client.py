@@ -1,6 +1,7 @@
 """Server-side adapter for document management; never reads/writes local Knowledge."""
 import logging
 import math
+import re
 from contextlib import contextmanager
 
 import httpx
@@ -20,10 +21,17 @@ PUBLIC_FIELDS = (
 
 
 def public_document(data):
-    if (not isinstance(data, dict) or type(data.get("id")) is not int
-            or data["id"] <= 0 or not isinstance(data.get("title"), str)):
+    if not isinstance(data, dict) or not isinstance(data.get("title"), str):
         raise HTTPException(502, "RAG Service trả dữ liệu tài liệu không hợp lệ")
+    raw_id = data.get("id")
+    document_id = str(raw_id) if type(raw_id) is int else raw_id
+    if (not isinstance(document_id, str)
+            or not re.fullmatch(r"[1-9][0-9]{0,19}", document_id)
+            or int(document_id) > 2**64 - 1):
+        raise HTTPException(502, "RAG Service trả ID tài liệu không hợp lệ")
     result = {key: data[key] for key in PUBLIC_FIELDS if key in data}
+    # Keep IDs as decimal strings so browsers never round 64-bit Qdrant IDs.
+    result["id"] = document_id
     if "source_text" in data:
         if not isinstance(data["source_text"], str):
             raise HTTPException(502, "Nội dung tài liệu từ RAG Service không hợp lệ")
@@ -62,11 +70,16 @@ class KnowledgeAdminClient:
         except (httpx.HTTPError, ValueError):
             raise HTTPException(502, "Không nhận được dữ liệu hợp lệ từ RAG Service.") from None
 
-    def documents(self):
+    def documents(self, *, doc_type_id: int | None = None, group_id: int | None = None):
         documents, seen = [], set()
-        # Existing UI displays all documents. Follow service pagination, never silently truncate.
+        # Follow service pagination without losing the selected taxonomy scope.
         for offset in range(0, 10000, 200):
-            data = self.request("GET", "api/v1/documents", params={"limit": 200, "offset": offset})
+            params = {"limit": 200, "offset": offset}
+            if doc_type_id is not None:
+                params["doc_type_id"] = doc_type_id
+            if group_id is not None:
+                params["group_id"] = group_id
+            data = self.request("GET", "api/v1/documents", params=params)
             batch = data.get("documents")
             if not isinstance(batch, list) or len(batch) > 200:
                 raise HTTPException(502, "Danh sách tài liệu từ RAG Service không hợp lệ")
@@ -82,22 +95,33 @@ class KnowledgeAdminClient:
     def detail(self, document_id):
         return public_document(self.request("GET", f"api/v1/documents/{document_id}"))
 
-    def delete(self, document_id):
-        data = self.request("DELETE", f"api/v1/documents/{document_id}")
-        if data.get("deleted") is not True or data.get("id") != document_id:
-            raise HTTPException(502, "Chưa xác nhận được kết quả xóa; hãy làm mới danh sách.")
-        # Do not return remote file_storage_key or other private storage metadata.
-        return {"success": True, "deleted": True, "id": document_id}
+    def detail_by_source_key(self, source_key):
+        if not isinstance(source_key, str) or not source_key.strip():
+            raise HTTPException(503, "Chưa cấu hình source_key tài liệu RAG.")
+        return public_document(self.request(
+            "GET",
+            "api/v1/documents/by-source-key",
+            params={"source_key": source_key.strip()},
+        ))
 
-    def upload(self, filename, content, category, source_key):
-        result = self.request(
-            "POST", "api/v1/documents/upload",
-            files={"file": (filename, content, "application/octet-stream")},
-            data={"source_key": source_key, "title": filename, "category": category},
-            timeout=httpx.Timeout(RAG_SERVICE_ADMIN_TIMEOUT_SECONDS, connect=5),
-        )
-        return {"success": True, "document": public_document(result)}
+    def details_by_category(self, category):
+        value = str(category or "").strip().casefold()
+        if not re.fullmatch(r"[a-z0-9][a-z0-9_-]{0,99}", value):
+            raise HTTPException(503, "Invalid RAG document category.")
 
+        matches = [
+            document
+            for document in self.documents()["documents"]
+            if document.get("category") == value
+            and document.get("is_active") is True
+        ]
+        if not matches:
+            raise HTTPException(
+                404,
+                f"No active documents found in category {value}.",
+            )
+
+        return [self.detail(document["id"]) for document in matches]
 
 @contextmanager
 def admin_client():

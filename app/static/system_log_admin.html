@@ -1,0 +1,75 @@
+<!doctype html>
+<html lang="vi">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width,initial-scale=1" />
+    <title>Lịch sử hệ thống · Đông Hải AI</title>
+    <link rel="stylesheet" href="/static/css/admin_sidebar.css?v=20260917-logs1" />
+    <link rel="stylesheet" href="/static/css/admin_pages.css?v=20260917-logs1" />
+    <link rel="stylesheet" href="/static/css/system_log_admin.css?v=20260917-logs2" />
+    <link rel="stylesheet" href="/static/css/admin_theme.css?v=20260928-green1" />
+    <link rel="stylesheet" href="/static/css/chatbot.css?v=20260928-green1" />
+  </head>
+  <body class="has-admin-sidebar system-log-page">
+    <aside class="admin-sidebar"></aside>
+    <div class="admin-page">
+      <header class="page-head">
+        <h1>Lịch sử hệ thống</h1>
+        <p>Theo dõi hoạt động ứng dụng, tích hợp và các lỗi hệ thống.</p>
+      </header>
+
+      <main class="page-content">
+        <section class="card log-card">
+          <div class="log-toolbar">
+            <div class="log-heading">
+              <h2>Nhật ký hoạt động</h2>
+              <p class="muted" id="logSummary">Đang tải dữ liệu…</p>
+            </div>
+            <div class="log-actions">
+              <label>
+                <span>Nguồn log</span>
+                <select id="logFile">
+                  <option value="__all__">Tất cả file log</option>
+                </select>
+              </label>
+              <label>
+                <span>Mức độ</span>
+                <select id="logLevel">
+                  <option value="">Tất cả mức độ</option>
+                  <option value="DEBUG">DEBUG</option>
+                  <option value="INFO">INFO</option>
+                  <option value="WARNING">WARNING</option>
+                  <option value="ERROR">ERROR</option>
+                  <option value="CRITICAL">CRITICAL</option>
+                </select>
+              </label>
+              <label class="log-search">
+                <span>Tìm nội dung</span>
+                <input id="logSearch" type="search" placeholder="Session, lỗi, sản phẩm…" autocomplete="off" />
+              </label>
+              <button id="refreshLogs" type="button">Làm mới</button>
+              <button class="danger-button" id="clearLogs" type="button">Giải phóng log</button>
+            </div>
+          </div>
+
+          <div id="logNotice" class="notice" role="status"></div>
+          <div id="logTruncated" class="log-warning" hidden>
+            Chỉ hiển thị phần log gần nhất do file có dung lượng lớn.
+          </div>
+
+          <div class="log-list" id="logList" aria-live="polite"></div>
+          <div class="log-empty" id="logEmpty" hidden>Không có bản ghi phù hợp.</div>
+
+          <footer class="log-pagination">
+            <button class="secondary-button" id="previousLogs" type="button">Trước</button>
+            <span id="logPage">Trang 1</span>
+            <button class="secondary-button" id="nextLogs" type="button">Sau</button>
+          </footer>
+        </section>
+      </main>
+    </div>
+
+    <script src="/static/js/admin_base.js?v=20260917-logs1"></script>
+    <script src="/static/js/system_log_admin.js?v=20260917-logs2" defer></script>
+  </body>
+</html>

@@ -35,6 +35,27 @@ PRODUCT_ALBUM_IMAGE_LIMIT = int(
 )
 HISTORY_LIMIT = int(os.getenv("CONVERSATION_HISTORY_LIMIT", "12"))
 
+IMAGE_QDRANT_URL = os.getenv(
+    "IMAGE_QDRANT_URL", "http://127.0.0.1:6333"
+).strip().rstrip("/")
+
+IMAGE_QDRANT_API_KEY = os.getenv(
+    "IMAGE_QDRANT_API_KEY", ""
+).strip()
+
+IMAGE_QDRANT_COLLECTION = os.getenv(
+    "IMAGE_QDRANT_COLLECTION", "bot_product_images_clip_v2"
+).strip()
+
+PRODUCT_CATALOG_PROVIDER = os.getenv(
+    "PRODUCT_CATALOG_PROVIDER", "qdrant"
+).strip().casefold()
+if PRODUCT_CATALOG_PROVIDER != "qdrant":
+    raise RuntimeError("PRODUCT_CATALOG_PROVIDER must be qdrant.")
+
+QDRANT_CATALOG_COLLECTION = os.getenv(
+    "QDRANT_CATALOG_COLLECTION", "bot_product_catalog_v1"
+).strip()
 
 def env_bool(name: str, default: bool = False) -> bool:
     value = os.getenv(name)
@@ -54,9 +75,40 @@ RAG_SERVICE_ADMIN_TIMEOUT_SECONDS = float(
 RAG_SERVICE_TIMEOUT_SECONDS = float(
     os.getenv("RAG_SERVICE_TIMEOUT_SECONDS", "40")
 )
-SHIPPING_POLICY_DOCUMENT_ID = int(
-    os.getenv("SHIPPING_POLICY_DOCUMENT_ID", "0")
+SHIPPING_POLICY_CATEGORY = os.getenv(
+    "SHIPPING_POLICY_CATEGORY", "shipping"
+).strip()
+SHIPPING_POLICY_CACHE_SECONDS = max(
+    int(os.getenv("SHIPPING_POLICY_CACHE_SECONDS", "300")),
+    0,
 )
+RAG_SEARCH_DOC_TYPE_ID = int(
+    os.getenv("RAG_SEARCH_DOC_TYPE_ID", "0")
+)
+
+RAG_SEARCH_GROUP_IDS = tuple(
+    int(value.strip())
+    for value in os.getenv(
+        "RAG_SEARCH_GROUP_IDS",
+        "",
+    ).split(",")
+    if value.strip()
+)
+
+if RAG_SEARCH_DOC_TYPE_ID < 0:
+    raise RuntimeError(
+        "RAG_SEARCH_DOC_TYPE_ID phải lớn hơn hoặc bằng 0."
+    )
+
+if any(group_id <= 0 for group_id in RAG_SEARCH_GROUP_IDS):
+    raise RuntimeError(
+        "RAG_SEARCH_GROUP_IDS chỉ được chứa ID nguyên dương."
+    )
+
+if len(set(RAG_SEARCH_GROUP_IDS)) != len(RAG_SEARCH_GROUP_IDS):
+    raise RuntimeError(
+        "RAG_SEARCH_GROUP_IDS không được chứa ID trùng nhau."
+    )
 CHANNEL_PROVIDER = os.getenv("CHANNEL_PROVIDER", "web").strip().casefold()
 CHANNEL_PROVIDERS = frozenset(
     provider.strip()
@@ -100,12 +152,13 @@ GOOGLE_SERVICE_ACCOUNT_FILE = os.getenv(
     "secrets/google-sheets-service-account.json",
 ).strip()
 
-# Product image recognition. V2 always reads the product catalog from DB.
-PRODUCTS_PATH = PROJECT_ROOT / "products.json"
-PRODUCT_CATALOG_SOURCE = "database"
+# Product image recognition reads the catalog from Qdrant.
 PRODUCT_IMAGE_DIR = DATA_DIR / "product_images"
 IMAGE_INTENT_PROMPT_PATH = PROMPT_DIR / "image_intent.txt"
 PRODUCT_RECOGNITION_PROMPT_PATH = PROMPT_DIR / "product_recognition.txt"
+PRODUCT_VECTOR_VERIFICATION_PROMPT_PATH = (
+    PROMPT_DIR / "product_vector_verification.txt"
+)
 PRODUCT_VECTOR_SEARCH_ENABLED = env_bool("PRODUCT_VECTOR_SEARCH_ENABLED", True)
 IMAGE_EMBEDDING_MODEL = os.getenv("IMAGE_EMBEDDING_MODEL", "ViT-B-32").strip()
 IMAGE_EMBEDDING_PRETRAINED = os.getenv(

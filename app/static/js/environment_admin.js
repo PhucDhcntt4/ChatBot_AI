@@ -301,7 +301,7 @@ async function waitForEnvironmentReload(previousRuntimeId) {
     await new Promise((resolve) => window.setTimeout(resolve, 750));
   }
   showEnvironmentNotice(
-    "File .env đã được lưu nhưng ứng dụng chưa khởi động lại. Hãy chạy lại start.ps1 hoặc khởi động lại service app và worker.",
+    "File .env đã được lưu nhưng ứng dụng chưa khởi động lại. Hãy chạy lại start.ps1 hoặc khởi động lại service FastAPI.",
     true,
   );
 }

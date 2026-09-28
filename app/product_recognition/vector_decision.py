@@ -136,7 +136,7 @@ def best_distinct_products(
 def decide_vector_match(
     rows: list[dict[str, Any]],
 ) -> VectorDecision:
-    """Tạo quyết định từ danh sách kết quả pgvector."""
+    """Tạo quyết định từ danh sách kết quả Qdrant."""
 
     # Keep evidence from multiple angles instead of retaining one image/color.
     distinct_products = best_distinct_products(rows)

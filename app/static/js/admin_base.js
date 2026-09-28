@@ -7,6 +7,7 @@
     ["/admin/conversations", "☰", "Hội thoại"],
     ["/admin/users", "♙", "Tài khoản", true],
     ["/admin/environment", "⚙", "Biến môi trường", true],
+    ["/admin/system-logs", "◴", "Lịch sử hệ thống", true],
   ];
   const sidebar = document.querySelector(".admin-sidebar");
   if (sidebar) {

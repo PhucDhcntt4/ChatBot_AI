@@ -426,9 +426,6 @@ tbody tr:hover td {
   width: min(820px, 100%);
 }
 
-.sync-all-button {
-  white-space: nowrap;
-}
 .catalog-tools input,
 .catalog-tools select {
   flex: 1;
@@ -576,9 +573,6 @@ button.small:focus-visible,
   .catalog-tools select {
     width: 100%;
     flex-basis: 100%;
-  }
-  .sync-all-button {
-    width: 100%;
   }
 }
 :root {
@@ -1448,99 +1442,6 @@ body.product-detail-open {
   overflow: hidden;
 }
 
-body.sync-confirm-open {
-  overflow: hidden;
-}
-
-.sync-confirm-overlay {
-  position: fixed;
-  inset: 0;
-  z-index: 125;
-  display: grid;
-  place-items: center;
-  padding: 24px;
-  background: rgba(39, 12, 17, 0.62);
-  backdrop-filter: blur(5px);
-}
-
-.sync-confirm-overlay[hidden] {
-  display: none;
-}
-
-.sync-confirm-dialog {
-  width: min(500px, 100%);
-  padding: 30px;
-  border: 1px solid #ead7da;
-  border-radius: 22px;
-  text-align: center;
-  background: #fffafa;
-  box-shadow: 0 28px 80px rgba(45, 8, 15, 0.3);
-}
-
-.sync-confirm-icon {
-  display: grid;
-  place-items: center;
-  width: 58px;
-  height: 58px;
-  margin: 0 auto 16px;
-  border-radius: 18px;
-  color: #fff;
-  background: linear-gradient(135deg, #c71936, #940d22);
-  box-shadow: 0 12px 28px rgba(163, 16, 40, 0.24);
-  font-size: 28px;
-  font-weight: 800;
-}
-
-.sync-confirm-dialog h2 {
-  margin: 0 0 10px;
-  color: #35151b;
-  font-size: 23px;
-}
-
-.sync-confirm-dialog > p {
-  min-height: 24px;
-  margin: 0 0 16px;
-  color: #6f545a;
-}
-
-.sync-confirm-warning {
-  padding: 13px 15px;
-  border: 1px solid #efd8dd;
-  border-radius: 13px;
-  color: #78545b;
-  background: #fff3f5;
-  font-size: 13px;
-  text-align: left;
-}
-
-.sync-confirm-actions {
-  display: grid;
-  grid-template-columns: 1fr 1fr;
-  gap: 12px;
-  margin-top: 22px;
-}
-
-.sync-confirm-actions button {
-  width: 100%;
-  margin: 0;
-}
-
-.sync-confirm-actions .sync-confirm-cancel {
-  color: #951027;
-  border: 1px solid #e8cbd1;
-  background: #fff;
-  box-shadow: none;
-}
-
-@media (max-width: 480px) {
-  .sync-confirm-dialog {
-    padding: 24px 20px;
-  }
-  .sync-confirm-actions {
-    grid-template-columns: 1fr;
-  }
-}
-
 .product-detail-overlay {
   position: fixed;
   inset: 0;
@@ -1698,6 +1599,60 @@ button.product-detail-close {
   white-space: pre-wrap;
 }
 
+.recognition-section {
+  border-color: #edcbd2;
+  background: #fff9fa;
+}
+
+.product-detail-section-head > div > p {
+  margin: 3px 0 0;
+  color: #806970;
+  font-size: 12px;
+}
+
+.recognition-upload-form {
+  display: grid;
+  grid-template-columns: minmax(220px, 1fr) minmax(180px, 0.65fr) auto;
+  gap: 12px;
+  align-items: end;
+  margin: 14px 0 16px;
+  padding: 14px;
+  border: 1px dashed #dcaab4;
+  border-radius: 14px;
+  background: #fff;
+}
+
+.recognition-upload-form label {
+  display: grid;
+  gap: 6px;
+  color: #6e5056;
+  font-size: 12px;
+  font-weight: 700;
+}
+
+.recognition-upload-form input {
+  width: 100%;
+  min-height: 42px;
+  padding: 9px 11px;
+  border: 1px solid #e5cdd2;
+  border-radius: 10px;
+  background: #fff;
+  color: #3b2025;
+}
+
+.recognition-upload-form input[type="file"] {
+  padding: 7px;
+}
+
+.recognition-upload-form button {
+  min-height: 42px;
+  white-space: nowrap;
+}
+
+.recognition-image-card {
+  border-color: #e7bcc5;
+}
+
 .product-detail-gallery {
   display: grid;
   grid-template-columns: repeat(4, minmax(0, 1fr));
@@ -1810,6 +1765,12 @@ button.product-detail-close {
   .product-detail-columns {
     grid-template-columns: 1fr;
   }
+  .recognition-upload-form {
+    grid-template-columns: 1fr 1fr;
+  }
+  .recognition-upload-form button {
+    grid-column: 1 / -1;
+  }
 }
 
 @media (max-width: 600px) {
@@ -1834,6 +1795,12 @@ button.product-detail-close {
   }
   .product-detail-gallery {
     grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+  .recognition-upload-form {
+    grid-template-columns: 1fr;
+  }
+  .recognition-upload-form button {
+    grid-column: auto;
   }
 }
 

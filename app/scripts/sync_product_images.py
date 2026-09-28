@@ -1,4 +1,3 @@
-import json
 import hashlib
 import mimetypes
 import re
@@ -8,13 +7,9 @@ from typing import Any
 from urllib.parse import urlparse
 
 import requests
-from psycopg.errors import UndefinedTable
 
-from app.config import (
-    PRODUCTS_PATH,
-    PRODUCT_IMAGE_DIR,
-)
-from app.database.connection import database_connection
+from app.config import PRODUCT_IMAGE_DIR
+from app.database.qdrant_catalog_repository import QdrantCatalogRepository
 
 
 ALLOWED_MIME_TYPES = {
@@ -93,62 +88,6 @@ def image_extension(
     return guessed or ".jpg"
 
 
-def load_products() -> list[dict[str, Any]]:
-    data = json.loads(
-        PRODUCTS_PATH.read_text(
-            encoding="utf-8"
-        )
-    )
-
-    if not isinstance(data, list):
-        raise ValueError(
-            "products.json phải là một danh sách"
-        )
-
-    return [
-        item
-        for item in data
-        if isinstance(item, dict)
-    ]
-
-
-def load_database_image_metadata(
-    source_urls: set[str],
-) -> dict[str, dict[str, str]]:
-    """Lấy ánh xạ URL → ảnh local từ PostgreSQL."""
-
-    if not source_urls:
-        return {}
-
-    try:
-        with database_connection() as connection:
-            rows = connection.execute(
-                """
-                SELECT DISTINCT ON (source_url)
-                       source_url, local_path, mime_type, checksum
-                FROM product_images
-                WHERE source_url = ANY(%s)
-                  AND local_path IS NOT NULL
-                  AND local_path <> ''
-                ORDER BY source_url, is_active DESC, updated_at DESC, id DESC
-                """,
-                (list(source_urls),),
-            ).fetchall()
-    except UndefinedTable:
-        # Lần đồng bộ đầu tiên có thể chạy trước khi schema catalog được tạo.
-        rows = []
-
-    return {
-        str(row["source_url"]): {
-            "local_path": str(row["local_path"]),
-            "mime_type": str(row["mime_type"] or "image/jpeg"),
-            "checksum": str(row["checksum"] or ""),
-        }
-        for row in rows
-        if row.get("source_url") and row.get("local_path")
-    }
-
-
 def existing_local_path(
     metadata: dict[str, str] | None,
 ) -> Path | None:
@@ -164,6 +103,23 @@ def existing_local_path(
     except ValueError:
         return None
     return image_path if image_path.is_file() else None
+
+
+def verified_local_metadata(metadata: dict[str, str] | None) -> dict[str, str] | None:
+    image_path = existing_local_path(metadata)
+    if image_path is None:
+        return None
+    try:
+        checksum = hashlib.sha256(image_path.read_bytes()).hexdigest()
+    except OSError:
+        return None
+    if metadata.get("checksum") and metadata["checksum"] != checksum:
+        return None
+    return {
+        "local_path": image_path.relative_to(PRODUCT_IMAGE_DIR.resolve()).as_posix(),
+        "mime_type": str(metadata.get("mime_type") or "image/jpeg"),
+        "checksum": checksum,
+    }
 
 
 def collect_images(
@@ -234,18 +190,15 @@ def download_image(
 
 
 def sync_product_images(
-    products: list[dict[str, Any]] | None = None,
+    products: list[dict[str, Any]],
 ) -> dict[str, Any]:
-    """Tải ảnh catalog và trả metadata để importer ghi PostgreSQL."""
+    """Download Shopify images and return metadata for the Qdrant catalog."""
 
     if hasattr(sys.stdout, "reconfigure"):
         sys.stdout.reconfigure(
             encoding="utf-8",
             errors="replace",
         )
-
-    if products is None:
-        products = load_products()
 
     PRODUCT_IMAGE_DIR.mkdir(
         parents=True,
@@ -255,8 +208,8 @@ def sync_product_images(
     downloaded = 0
     skipped = 0
     failed = 0
-    active_urls: set[str] = set()
     tasks: list[tuple[str, str, Path, int, dict[str, Any]]] = []
+    codes: set[str] = set()
 
     for wrapper in products:
         nested_product = wrapper.get("product")
@@ -271,6 +224,7 @@ def sync_product_images(
             wrapper=wrapper,
             product=product,
         )
+        codes.add(code)
 
         shopify_product_id = safe_name(
             product.get("legacyResourceId")
@@ -297,7 +251,6 @@ def sync_product_images(
             if not image_url:
                 continue
 
-            active_urls.add(image_url)
             tasks.append((
                 code,
                 shopify_product_id,
@@ -306,14 +259,18 @@ def sync_product_images(
                 image,
             ))
 
-    database_metadata = load_database_image_metadata(active_urls)
     local_images: dict[str, dict[str, str]] = {}
+    catalog = QdrantCatalogRepository()
+    catalog.ensure_collection()
+    existing_by_url = {
+        str(record["source_url"]): record
+        for record in catalog.image_records(sorted(codes))
+    }
 
     for code, shopify_product_id, product_dir, position, image in tasks:
         image_url = str(image.get("url") or "").strip()
-        existing = database_metadata.get(image_url)
-        existing_path = existing_local_path(existing)
-        if existing and existing_path:
+        existing = verified_local_metadata(existing_by_url.get(image_url))
+        if existing:
             local_images[image_url] = existing
             skipped += 1
             continue
@@ -363,7 +320,7 @@ def sync_product_images(
     print(f"Đã tải: {downloaded}")
     print(f"Đã tồn tại: {skipped}")
     print(f"Lỗi: {failed}")
-    print("Metadata ảnh sẽ được lưu trực tiếp vào PostgreSQL.")
+    print("Metadata ảnh sẽ được lưu trong payload Qdrant catalog.")
 
     return {
         "downloaded": downloaded,
@@ -371,22 +328,3 @@ def sync_product_images(
         "failed": failed,
         "local_images": local_images,
     }
-
-
-def main() -> None:
-    products = load_products()
-    result = sync_product_images(products)
-
-    # Không còn manifest trung gian: CLI cũng phải ghi metadata ảnh vào DB.
-    from app.services.product_import_service import (
-        import_products_to_database,
-    )
-    sync_run_id = import_products_to_database(
-        products,
-        local_images=result["local_images"],
-    )
-    print(f"Đã lưu metadata ảnh vào PostgreSQL: sync_run_id={sync_run_id}")
-
-
-if __name__ == "__main__":
-    main()

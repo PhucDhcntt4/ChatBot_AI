@@ -16,6 +16,7 @@ from app.conversation.models import (
 )
 from app.conversation.presenter import ConversationPresenter
 from app.database.product_repository import ProductRepository
+from app.database.product_repository_factory import create_product_repository
 from app.product_recognition.catalog_service import ProductCatalogService
 from app.product_recognition.handler import ProductImageHandler
 from app.product_recognition.image_crop import crop_product_region
@@ -40,8 +41,8 @@ class ProductImageConversationService:
         self.client = client or ProviderVisionClient(ai)
         self.model = ai.model
         self.context_store = context_store
-        self.repository = repository or ProductRepository()
-        self.catalog = ProductCatalogService(source="database")
+        self.repository = repository if repository is not None else create_product_repository()
+        self.catalog = ProductCatalogService(repository=self.repository)
         self.intent_service = ImageIntentService(ai=self.ai, catalog=self.catalog)
         self.handler = ProductImageHandler(
             client=self.client,

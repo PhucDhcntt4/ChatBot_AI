@@ -1,19 +1,43 @@
-"""The bot's only knowledge retrieval backend: the versioned RAG Service API."""
 import httpx # type: ignore
 
-
 class RemoteKnowledgeSearch:
-    def __init__(self, base_url: str, api_key: str, timeout: float = 40):
+    def __init__(
+        self,
+        base_url: str,
+        api_key: str,
+        timeout: float = 40,
+        doc_type_id: int | None = None,
+        group_ids: tuple[int, ...] = (),
+    ):
+        self.doc_type_id = doc_type_id
+        self.group_ids = list(group_ids)
+
         self.client = httpx.Client(
             base_url=base_url.rstrip("/") + "/",
-            headers={"Authorization": f"Bearer {api_key}"},
+            headers={
+                "Authorization": f"Bearer {api_key}",
+            },
             timeout=httpx.Timeout(timeout, connect=5),
             follow_redirects=False,
         )
 
     def search(self, question: str, *, categories: list[str] | None = None):
-        response = self.client.post("api/v1/knowledge/search", json={"query": question, "categories": categories})
-        # A timeout/503 is NOT knowledge_not_found. Let the bot handle service failure separately.
+        payload: dict = {
+            "query":question,
+        }
+        if self.doc_type_id:
+            payload["doc_type_id"] = self.doc_type_id
+
+            if self.group_ids:
+                payload["group_ids"] = self.group_ids
+        elif categories:
+            payload["categories"] = categories
+
+        response = self.client.post(
+            "api/v1/knowledge/search",
+            json=payload,
+        )
+
         response.raise_for_status()
         data = response.json()
         if not isinstance(data, dict) or not all(key in data for key in ("success", "status", "content", "sources")):

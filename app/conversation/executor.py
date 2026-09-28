@@ -11,6 +11,7 @@ from app.conversation.models import (
     ProductMedia,
 )
 from app.database.product_repository import ProductRepository
+from app.database.product_repository_factory import create_product_repository
 
 
 class ConversationExecutor:
@@ -19,7 +20,7 @@ class ConversationExecutor:
         products: ProductRepository | None = None,
         knowledge_search: Callable[[str], dict[str, Any]] | None = None,
     ) -> None:
-        self.products = products or ProductRepository()
+        self.products = products if products is not None else create_product_repository()
         self.knowledge_search = knowledge_search
         self.handlers = {
             ConversationIntent.PRODUCT_SEARCH: self._product_search,

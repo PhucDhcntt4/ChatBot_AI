@@ -2,6 +2,7 @@
 __pycache__/
 *.pyc
 .venv/
+.vscode/
 .pytest_cache/
 .ua/
 #prompts/*
@@ -17,4 +18,5 @@ products.json
 secrets/
 *.service.json
 log/
+backups/
 prompts/.versions/

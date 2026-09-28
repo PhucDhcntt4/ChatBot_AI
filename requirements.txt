@@ -8,14 +8,14 @@ httpx==0.28.1
 # Cấu hình và HTTP client cho Shopify/Telegram/Facebook
 python-dotenv==1.0.1
 requests==2.34.2
+tzdata==2026.4
 
 # AI providers
 google-genai==2.8.0
 openai==2.41.1
 
-# PostgreSQL, pgvector và Redis
+# PostgreSQL và Redis
 psycopg[binary]==3.3.4
-pgvector==0.5.0
 redis==8.1.0
 
 # Nhận diện ảnh và image embedding
@@ -23,9 +23,6 @@ Pillow==12.3.0
 open-clip-torch==3.3.0
 torch==2.13.0
 torchvision==0.28.0
-
-# Import Excel (tài liệu Knowledge được xử lý tại RAG Service)
-openpyxl==3.1.5
 
 # Xuất đơn hàng sang Google Sheets
 google-api-python-client==2.197.0

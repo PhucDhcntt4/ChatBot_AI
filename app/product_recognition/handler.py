@@ -1,4 +1,6 @@
 import logging
+import threading
+from time import perf_counter
 
 from google import genai
 
@@ -8,9 +10,7 @@ from app.config import (
     VECTOR_MIN_MARGIN,
     VECTOR_SEARCH_LIMIT,
 )
-from app.database.product_embedding_repository import (
-    ProductEmbeddingRepository,
-)
+from app.database.qdrant_image_repository import QdrantImageRepository
 from app.product_recognition.catalog_service import (
     ProductCatalogService,
 )
@@ -19,9 +19,6 @@ from app.product_recognition.recognition_service import (
 )
 from app.product_recognition.models import (
     MIN_PRODUCT_MATCH_CONFIDENCE,
-)
-from app.product_recognition.image_embedding_service import (
-    ImageEmbeddingService,
 )
 from app.product_recognition.vector_decision import decide_vector_match
 from app.product_recognition.product_type_groups import (
@@ -35,6 +32,42 @@ logger = logging.getLogger("uvicorn.error")
 class ProductImageHandler:
     TOP_RECHECK_MIN_CONFIDENCE = 0.98
     TOP_RECHECK_MIN_ADVANTAGE = 0.05
+    GLOBAL_VERIFICATION_CANDIDATES = 5
+    TYPE_VERIFICATION_CANDIDATES = 7
+    MAX_VERIFICATION_CANDIDATES = 12
+
+    @classmethod
+    def _merge_verification_candidates(
+        cls,
+        global_candidates: list[dict],
+        type_candidates: list[dict] | None = None,
+    ) -> list[dict]:
+        """Combine global and category recall without duplicate SKUs."""
+
+        merged: list[dict] = []
+        seen_codes: set[str] = set()
+
+        def add(candidate: dict | None) -> None:
+            if not candidate:
+                return
+            code = str(
+                candidate.get("product_code") or ""
+            ).strip().upper()
+            if not code or code in seen_codes:
+                return
+            merged.append(candidate)
+            seen_codes.add(code)
+
+        for candidate in global_candidates[
+            :cls.GLOBAL_VERIFICATION_CANDIDATES
+        ]:
+            add(candidate)
+        for candidate in (type_candidates or [])[
+            :cls.TYPE_VERIFICATION_CANDIDATES
+        ]:
+            add(candidate)
+
+        return merged[:cls.MAX_VERIFICATION_CANDIDATES]
 
     def __init__(
         self,
@@ -53,15 +86,39 @@ class ProductImageHandler:
         self.vector_enabled = PRODUCT_VECTOR_SEARCH_ENABLED
         self.embedding_service = None
         self.embedding_repository = None
-        if self.vector_enabled:
+        self._vector_init_lock = threading.Lock()
+
+    def _ensure_vector_backend(self) -> bool:
+        """Load Torch/OpenCLIP only when an image actually needs retrieval."""
+        if not self.vector_enabled:
+            return False
+        if self.embedding_service is not None and self.embedding_repository is not None:
+            return True
+        with self._vector_init_lock:
+            if self.embedding_service is not None and self.embedding_repository is not None:
+                return True
+            started = perf_counter()
             try:
+                from app.product_recognition.image_embedding_service import (
+                    ImageEmbeddingService,
+                )
+
                 self.embedding_service = ImageEmbeddingService()
-                self.embedding_repository = ProductEmbeddingRepository()
+                self.embedding_repository = QdrantImageRepository()
+                self.embedding_repository.ready()
+                logger.info(
+                    "IMAGE VECTOR configured backend=qdrant lazy_load=%.3fs",
+                    perf_counter() - started,
+                )
             except Exception:
                 logger.exception(
                     "VECTOR INITIALIZATION ERROR; fallback=legacy_gemini"
                 )
+                self.embedding_service = None
+                self.embedding_repository = None
                 self.vector_enabled = False
+                return False
+        return True
 
     def _match_with_vector(
         self,
@@ -73,7 +130,7 @@ class ProductImageHandler:
     ) -> list[dict]:
         """Global vector retrieval plus an additive product-type recall lane."""
 
-        if not self.embedding_service or not self.embedding_repository:
+        if not self._ensure_vector_backend():
             return []
 
         embedding = self.embedding_service.embed_bytes(image_bytes)
@@ -135,20 +192,18 @@ class ProductImageHandler:
         )
 
         decision = decide_vector_match(rows)
-        verification_candidates = list(decision.candidates)
-        type_candidate = (
-            type_decision.best_candidate
+        type_candidates = (
+            type_decision.candidates
             if (
                 type_decision is not None
                 and type_decision.status != "no_match"
             )
-            else None
+            else []
         )
-        if type_candidate and all(
-            item.get("product_code") != type_candidate.get("product_code")
-            for item in verification_candidates
-        ):
-            verification_candidates.append(type_candidate)
+        verification_candidates = self._merge_verification_candidates(
+            decision.candidates,
+            type_candidates,
+        )
 
         logger.debug(
             "VECTOR PRODUCT CANDIDATES classified_type=%s status=%s "

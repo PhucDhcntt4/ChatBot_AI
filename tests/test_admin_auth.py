@@ -7,6 +7,7 @@ from app.middleware import AdminAuthMiddleware
 from app.routes.admin_auth_router import router as admin_auth_router
 from app.routes.admin_user_router import router as admin_user_router
 from app.routes.admin_environment_router import router as admin_environment_router
+from app.routes.admin_system_log_router import router as admin_system_log_router
 from app.services.admin_auth_service import (
     AdminAuthConfigurationError,
     AdminAuthService,
@@ -114,6 +115,7 @@ def _protected_test_app(service: AdminAuthService) -> FastAPI:
     app.include_router(admin_auth_router)
     app.include_router(admin_user_router)
     app.include_router(admin_environment_router)
+    app.include_router(admin_system_log_router)
 
     @app.get("/admin/secret")
     def secret():
@@ -293,6 +295,43 @@ class AdminAuthTests(unittest.TestCase):
         )
         self.assertEqual(self.client.get("/admin/environment").status_code, 403)
         self.assertEqual(self.client.get("/admin/environment/api").status_code, 403)
+
+    def test_only_admin_can_view_system_logs(self):
+        self.client.post(
+            "/admin/login",
+            json={"username": "admin", "password": "strong-password"},
+        )
+        self.assertEqual(self.client.get("/admin/system-logs").status_code, 200)
+        response = self.client.get("/admin/system-logs/api/files")
+        self.assertEqual(response.status_code, 200)
+        self.assertIn("files", response.json())
+        entries = self.client.get(
+            "/admin/system-logs/api/entries",
+            params={"file": "__all__", "limit": 25},
+        )
+        self.assertEqual(entries.status_code, 200)
+        self.assertIn("entries", entries.json())
+
+        self.client.post("/admin/logout")
+        self.repository.user["role"] = "manager"
+        self.repository.user["session_version"] += 1
+        self.client.post(
+            "/admin/login",
+            json={"username": "admin", "password": "strong-password"},
+        )
+        self.assertEqual(self.client.get("/admin/system-logs").status_code, 403)
+        self.assertEqual(
+            self.client.get("/admin/system-logs/api/files").status_code,
+            403,
+        )
+        self.assertEqual(
+            self.client.get("/admin/system-logs/api/entries").status_code,
+            403,
+        )
+        self.assertEqual(
+            self.client.delete("/admin/system-logs/api/entries").status_code,
+            403,
+        )
 
     def test_admin_cannot_lock_self_and_non_admin_cannot_manage_users(self):
         self.client.post(

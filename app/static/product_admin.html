@@ -3,16 +3,18 @@
   <head>
     <meta charset="utf-8" />
     <meta name="viewport" content="width=device-width,initial-scale=1" />
-    <title>Product Sync • Đông Hải</title>
+    <title>Kho sản phẩm · Đông Hải AI</title>
     <link
       rel="stylesheet"
-      href="/static/css/product_admin.css?v=20260828-type-filter1"
+      href="/static/css/product_admin.css?v=20260928-catalog1"
     />
     <link
       rel="stylesheet"
       href="/static/css/admin_sidebar.css?v=20260904-environment2"
     />
-    <link rel="stylesheet" href="/static/css/chatbot.css?v=20260824-1" />
+    <link rel="stylesheet" href="/static/css/admin_theme.css?v=20260928-green1" />
+    <link rel="stylesheet" href="/static/css/product_rag_theme.css?v=20260928-3" />
+    <link rel="stylesheet" href="/static/css/chatbot.css?v=20260928-green1" />
   </head>
   <body class="has-admin-sidebar">
     <aside class="admin-sidebar">
@@ -28,146 +30,43 @@
         <a href="/admin/conversations"><span>☰</span>Hội thoại</a>
       </nav>
     </aside>
-    <header class="top">
-      <div class="wrap">
-        <div class="brand">ĐÔNG HẢI · PRODUCT ADMIN</div>
-        <h1>Đồng bộ danh mục sản phẩm</h1>
-        <p class="lead">
-          Lấy dữ liệu Shopify, tải ảnh, cập nhật PostgreSQL và tạo embedding
-          trong một quy trình duy nhất.
-        </p>
-      </div>
-    </header>
-    <main class="wrap content">
-      <div class="grid">
-        <section class="card">
-          <div class="card-title">
-            <div class="icon">⌘</div>
-            <h2>Nhập mã trực tiếp</h2>
-          </div>
-          <p class="help">
-            Mỗi SKU trên một dòng hoặc ngăn cách bằng dấu phẩy.
-          </p>
-          <textarea
-            id="skuText"
-            placeholder="FE04&#10;G81V6&#10;TM32"
-          ></textarea
-          ><button id="skuButton">Bắt đầu đồng bộ</button>
-        </section>
-        <section class="card">
-          <div class="card-title">
-            <div class="icon">⇧</div>
-            <h2>Nhập danh sách Excel</h2>
-          </div>
-          <p class="help">File .xlsx tối đa 5 MB, cột SKU hoặc Mã sản phẩm.</p>
-          <label class="drop"
-            ><div>
-              <div style="font-size: 30px">▤</div>
-              <b>Chọn file Excel</b><br /><span id="fileName" class="help"
-                >Chưa có file được chọn</span
-              ><input
-                id="excelFile"
-                type="file"
-                accept=".xlsx"
-                hidden
-              /></div></label
-          ><button id="excelButton">Tải file và đồng bộ</button>
-        </section>
-      </div>
-      <section class="card status-card" id="statusCard" hidden>
-        <div class="status-head">
-          <div class="status-copy">
-            <div class="spinner" id="statusIcon"></div>
-            <div>
-              <h2 id="statusTitle">Đang chuẩn bị…</h2>
-              <div class="help" id="phaseLabel">
-                Hệ thống đang khởi tạo tác vụ
-              </div>
-            </div>
-          </div>
-          <span class="badge" id="statusBadge">ĐANG CHẠY</span>
-        </div>
-        <div class="progress-label">
-          <span>Tiến độ toàn bộ</span><b id="progressText">0%</b>
-        </div>
-        <div class="bar"><div id="progress"></div></div>
-        <div class="steps">
-          <div class="step" data-phase="shopify"><span>1</span>Shopify</div>
-          <div class="step" data-phase="catalog"><span>2</span>Lưu catalog</div>
-          <div class="step" data-phase="images"><span>3</span>Tải ảnh</div>
-          <div class="step" data-phase="database"><span>4</span>PostgreSQL</div>
-          <div class="step" data-phase="embedding"><span>5</span>Embedding</div>
-        </div>
-        <div class="metrics">
-          <div class="metric">
-            <small>Tổng SKU</small><strong id="total">0</strong>
-          </div>
-          <div class="metric">
-            <small>Đã xử lý</small><strong id="processed">0</strong>
-          </div>
-          <div class="metric">
-            <small>Thành công</small
-            ><strong class="ok" id="succeeded">0</strong>
-          </div>
-          <div class="metric">
-            <small>Có lỗi</small><strong class="bad" id="failed">0</strong>
+    <div class="product-admin-page">
+      <header class="product-topbar">
+        <span>Không gian quản trị <span class="slash">/</span> <strong>Kho sản phẩm</strong></span>
+        <span class="product-connection">Qdrant</span>
+      </header>
+      <main class="product-workspace">
+        <div class="product-page-heading">
+          <div>
+            <div class="product-eyebrow">PRODUCT CATALOG</div>
+            <h1>Kho sản phẩm</h1>
+            <p>Theo dõi dữ liệu sản phẩm và trạng thái AI trên Qdrant.</p>
           </div>
         </div>
-        <details>
-          <summary>Nhật ký đồng bộ</summary>
-          <pre id="messages" aria-live="polite">Chưa có dữ liệu.</pre>
-        </details>
-        <div class="table-wrap">
-          <table>
-            <thead>
-              <tr>
-                <th>SKU</th>
-                <th>Trạng thái</th>
-                <th>Shopify Products</th>
-                <th>Ảnh mới</th>
-                <th>Chi tiết</th>
-              </tr>
-            </thead>
-            <tbody id="results">
-              <tr>
-                <td colspan="5" class="empty">
-                  <div class="empty-state">
-                    <div class="empty-icon">◷</div>
-                    <span>Kết quả sẽ hiển thị tại đây.</span>
-                  </div>
-                </td>
-              </tr>
-            </tbody>
-          </table>
-        </div>
-      </section>
-      <section class="card catalog-card">
+
+        <section class="card catalog-card product-library">
         <div class="catalog-head">
           <div>
             <div class="card-title">
               <div class="icon">◉</div>
-              <h2>Sản phẩm đã đồng bộ AI</h2>
+              <h2>Tất cả sản phẩm</h2>
             </div>
             <div class="catalog-summary">
               <span>Tổng: <b id="catalogTotal">0</b> sản phẩm</span
               ><span>Model: <b id="catalogModel">—</b></span>
+              <span>Nguồn dữ liệu: <b id="catalogProvider">—</b></span>
             </div>
           </div>
           <div class="catalog-tools">
-            <button
-              class="small sync-all-button"
-              id="syncAllButton"
-              type="button"
-              title="Đồng bộ lại toàn bộ sản phẩm ACTIVE"
-            >
-              Đồng bộ tất cả
-            </button>
             <select id="catalogType" aria-label="Lọc theo thể loại sản phẩm">
               <option value="">Tất cả thể loại</option>
             </select>
+            <select id="catalogStatus" aria-label="Lọc theo trạng thái sản phẩm">
+              <option value="">Tất cả trạng thái</option>
+            </select>
             <input
               id="catalogSearch"
-              placeholder="Tìm mã, tên hoặc loại sản phẩm"
+              placeholder="Tìm tên, mã sản phẩm hoặc loại sản phẩm…"
               aria-label="Tìm kiếm sản phẩm"
             /><button class="small" id="catalogSearchButton">Tìm</button
             ><button
@@ -184,14 +83,14 @@
           <table>
             <thead>
               <tr>
-                <th>Mã</th>
                 <th>Sản phẩm</th>
+                <th>Mã SP</th>
+                <th>Loại</th>
                 <th>Màu</th>
-                <th>Variant</th>
-                <th>Ảnh local</th>
-                <th>Embedding</th>
+                <th>Vector ảnh</th>
+                <th>Trạng thái</th>
                 <th>AI</th>
-                <th>Cập nhật</th>
+                <th><span class="sr-only">Thao tác</span></th>
               </tr>
             </thead>
             <tbody id="catalogRows">
@@ -206,71 +105,38 @@
             </tbody>
           </table>
         </div>
-        <div class="pagination">
-          <button id="catalogPrev" aria-label="Trang trước">
-            ← Trang trước</button
-          ><span class="page-info"
-            >Trang <b id="catalogPage">1</b> / <b id="catalogPages">1</b></span
-          ><button id="catalogNext" aria-label="Trang sau">Trang sau →</button>
-        </div>
-      </section>
-    </main>
-    <div
-      class="product-detail-overlay"
-      id="productDetailModal"
-      role="dialog"
-      aria-modal="true"
-      aria-labelledby="productDetailTitle"
-      hidden
-    >
-      <section class="product-detail-dialog">
-        <header class="product-detail-head">
-          <div>
-            <span class="product-detail-code" id="productDetailCode">—</span>
-            <h2 id="productDetailTitle">Chi tiết sản phẩm</h2>
+        <footer class="pagination">
+          <div class="pagination-summary">
+            Tổng sản phẩm: <strong id="catalogTotalFooter">0</strong>
+            <span class="page-info">Trang <b id="catalogPage">1</b> / <b id="catalogPages">1</b></span>
           </div>
-          <button
-            class="product-detail-close"
-            id="productDetailClose"
-            type="button"
-            aria-label="Đóng chi tiết sản phẩm"
-          >
-            &times;
-          </button>
-        </header>
-        <div class="product-detail-body" id="productDetailBody">
-          <div class="product-detail-loading">Đang tải thông tin sản phẩm…</div>
-        </div>
-      </section>
+          <div class="pagination-controls">
+            <button class="pagination-arrow" id="catalogPrev" aria-label="Trang trước">←</button>
+            <div class="pagination-pages" id="catalogPaginationPages"></div>
+            <button class="pagination-arrow" id="catalogNext" aria-label="Trang sau">→</button>
+            <select class="pagination-size" id="catalogPageSize" aria-label="Số sản phẩm mỗi trang">
+              <option value="20">20 / trang</option>
+              <option value="50">50 / trang</option>
+              <option value="100">100 / trang</option>
+            </select>
+          </div>
+        </footer>
+        </section>
+      </main>
     </div>
-    <div
-      class="sync-confirm-overlay"
-      id="syncAllConfirmModal"
-      role="dialog"
-      aria-modal="true"
-      aria-labelledby="syncAllConfirmTitle"
-      hidden
-    >
-      <section class="sync-confirm-dialog">
-        <div class="sync-confirm-icon">↻</div>
-        <h2 id="syncAllConfirmTitle">Đồng bộ lại tất cả sản phẩm?</h2>
-        <p id="syncAllConfirmText">
-          Hệ thống đang kiểm tra số lượng sản phẩm cần đồng bộ.
-        </p>
-        <div class="sync-confirm-warning">
-          Tác vụ sẽ chạy qua worker và có thể mất nhiều thời gian. Chatbot vẫn
-          hoạt động bình thường trong quá trình này.
+    <dialog id="productDetailModal" class="product-detail-dialog" aria-labelledby="productDetailTitle">
+      <div class="product-detail-head">
+        <div>
+          <div class="product-eyebrow">PRODUCT DETAIL</div>
+          <h2 id="productDetailTitle">Chi tiết sản phẩm</h2>
+          <p class="product-detail-meta" id="productDetailMeta">—</p>
         </div>
-        <div class="sync-confirm-actions">
-          <button id="syncAllCancel" class="sync-confirm-cancel" type="button">
-            Hủy
-          </button>
-          <button id="syncAllConfirm" type="button">
-            Xác nhận đồng bộ
-          </button>
-        </div>
-      </section>
-    </div>
+        <button class="product-detail-close" id="productDetailClose" type="button" aria-label="Đóng chi tiết sản phẩm">&times;</button>
+      </div>
+      <div class="product-detail-body" id="productDetailBody">
+        <div class="product-detail-loading">Đang tải thông tin sản phẩm…</div>
+      </div>
+    </dialog>
     <div class="toast-stack" id="toastStack" aria-live="polite"></div>
 
     <button class="ck-launcher" id="chatLauncher" aria-expanded="false">
@@ -383,9 +249,9 @@
         &#8250;
       </button>
     </div>
-    <script src="/static/js/admin_base.js?v=20260904-environment2"></script>
+    <script src="/static/js/admin_base.js?v=20260917-logs1"></script>
     <script
-      src="/static/js/product_admin.js?v=20260828-type-filter1"
+      src="/static/js/product_catalog_admin.js?v=20260928-1"
       defer
     ></script>
   </body>

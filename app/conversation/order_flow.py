@@ -1,6 +1,9 @@
+import logging
 import re
 import unicodedata
 from typing import Any
+
+from fastapi import HTTPException  # type: ignore
 
 from app.conversation.models import (
     ConversationContext,
@@ -10,6 +13,9 @@ from app.conversation.models import (
     SalesStage,
 )
 from app.conversation.shipping_policy import ShippingPolicyService
+
+
+logger = logging.getLogger("uvicorn.error")
 
 
 class OrderFlowService:
@@ -558,9 +564,17 @@ class OrderFlowService:
             if items and all(value is not None for value in subtotals)
             else None
         )
-        shipping_fee = self.shipping_policy.standard_fee(
-            context.draft_payment_method
-        )
+        try:
+            shipping_fee = self.shipping_policy.standard_fee(
+                context.draft_payment_method
+            )
+        except HTTPException as error:
+            logger.warning(
+                "SHIPPING POLICY unavailable status=%s detail=%s",
+                error.status_code,
+                error.detail,
+            )
+            shipping_fee = None
         promotion_applied = bool(context.draft_promotion_note) and (
             context.draft_promotion_eligible is True
         )

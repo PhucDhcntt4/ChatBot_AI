@@ -123,7 +123,9 @@ function renderRows(items) {
           <button class="mode-switch${botEnabled ? " on" : ""}" type="button" role="switch" aria-checked="${botEnabled}" title="${botEnabled ? "Bot đang bật — bấm để chuyển nhân viên" : "Bot đang tắt — bấm để bật lại bot"}">
             <span class="track"><span class="thumb"></span></span><span class="switch-label">${botEnabled ? "Bật" : `Tắt · ${countdownLabel(remaining)}`}</span>
           </button>
-          <button class="delete-session row-clear-cache icon-only${item.cache_active ? "" : " is-empty"}" type="button" title="${item.cache_active ? "Xóa cache Redis, giữ lịch sử PostgreSQL" : "Cache Redis đã được xóa"}" aria-label="${item.cache_active ? "Xóa cache Redis" : "Cache Redis đã được xóa"}" ${item.cache_active ? "" : "disabled"}>${CLEAR_CACHE_ICON}</button>
+          ${item.cache_active
+            ? `<button class="delete-session row-clear-cache icon-only" type="button" title="Xóa cache Redis, giữ lịch sử PostgreSQL" aria-label="Xóa cache Redis">${CLEAR_CACHE_ICON}</button>`
+            : `<span class="row-clear-cache-placeholder" aria-hidden="true"></span>`}
         </div>
       </td>
     </tr>`;
@@ -244,27 +246,25 @@ async function openSession(channel, sessionId) {
   const historyElement = $("conversationHistory");
   historyElement.innerHTML = history.length
     ? history
-        .map(
-          (message) => {
-            const timeLabel = messageTimeLabel(message.created_at);
-            const timeElement = timeLabel
-              ? `<time datetime="${escapeHtml(message.created_at)}">${escapeHtml(timeLabel)}</time>`
-              : "";
-            return `<div class="history-message ${message.role}"><div class="history-message-header"><span>${message.role === "user" ? "Khách hàng" : "Trợ lý"}</span>${timeElement}</div><p>${escapeHtml(message.text)}</p></div>`;
-          },
-        )
+        .map((message) => {
+          const timeLabel = messageTimeLabel(message.created_at);
+          const timeElement = timeLabel
+            ? `<time datetime="${escapeHtml(message.created_at)}">${escapeHtml(timeLabel)}</time>`
+            : "";
+          return `<div class="history-message ${message.role}"><div class="history-message-header"><span>${message.role === "user" ? "Khách hàng" : "Trợ lý"}</span>${timeElement}</div><p>${escapeHtml(message.text)}</p></div>`;
+        })
         .join("")
     : '<div class="empty-history">Hội thoại chưa có tin nhắn.</div>';
-  $("conversationFooter").textContent =
-    activeCache
-      ? `Cache Redis còn lại: ${ttlLabel(item.ttl_seconds)}`
-      : "Cache đã được giải phóng · lịch sử PostgreSQL vẫn được lưu";
+  $("conversationFooter").textContent = activeCache
+    ? `Cache Redis còn lại: ${ttlLabel(item.ttl_seconds)}`
+    : "Cache đã được giải phóng · lịch sử PostgreSQL vẫn được lưu";
   const clearCacheButton = $("clearCurrentCache");
   if (clearCacheButton) clearCacheButton.hidden = !activeCache;
   renderHumanModeButton();
   $("conversationModal").hidden = false;
   document.body.style.overflow = "hidden";
-  const historyScroller = historyElement.closest(".modal-body") || historyElement;
+  const historyScroller =
+    historyElement.closest(".modal-body") || historyElement;
   requestAnimationFrame(() => {
     historyScroller.scrollTop = historyScroller.scrollHeight;
     requestAnimationFrame(() => {
@@ -289,7 +289,12 @@ function renderHumanModeButton() {
   $("humanModeDuration").disabled =
     humanModeBusy || globalHumanModeBusy || durationBusy;
 }
-function syncRowHumanMode(channel, sessionId, isHuman, remainingSeconds = null) {
+function syncRowHumanMode(
+  channel,
+  sessionId,
+  isHuman,
+  remainingSeconds = null,
+) {
   const row = document.querySelector(
     `.session-row[data-channel="${CSS.escape(channel)}"][data-session="${CSS.escape(sessionId)}"]`,
   );
@@ -323,7 +328,9 @@ async function toggleRowHumanMode(row, button) {
         headers: isHuman ? undefined : { "Content-Type": "application/json" },
         body: isHuman
           ? undefined
-          : JSON.stringify({ ttl_seconds: Number($("humanModeDuration").value) }),
+          : JSON.stringify({
+              ttl_seconds: Number($("humanModeDuration").value),
+            }),
       }),
     );
     const next = !isHuman;
@@ -374,7 +381,7 @@ async function toggleHumanMode() {
     );
     activeHumanMode = !activeHumanMode;
     activeHumanModeRemaining = activeHumanMode
-      ? response.details?.remaining_seconds ?? null
+      ? (response.details?.remaining_seconds ?? null)
       : null;
     const badge = $("humanModeBadge");
     if (badge) {
@@ -445,7 +452,10 @@ function openClearCacheConfirm(channel, sessionId) {
   const text = $("clearCacheConfirmText");
   const cancel = $("clearCacheCancel");
   if (!modal || !text || !cancel) {
-    notice("Giao diện đang dùng bộ nhớ đệm cũ. Nhấn Ctrl + F5 rồi thử lại.", true);
+    notice(
+      "Giao diện đang dùng bộ nhớ đệm cũ. Nhấn Ctrl + F5 rồi thử lại.",
+      true,
+    );
     return;
   }
   pendingCacheClear = { channel, sessionId };
@@ -572,10 +582,7 @@ document.addEventListener("keydown", (event) => {
 });
 window.setInterval(() => {
   document.querySelectorAll(".session-row[data-human='1']").forEach((row) => {
-    const remaining = Math.max(
-      0,
-      Number(row.dataset.humanRemaining || 0) - 1,
-    );
+    const remaining = Math.max(0, Number(row.dataset.humanRemaining || 0) - 1);
     if (remaining === 0) {
       syncRowHumanMode(row.dataset.channel, row.dataset.session, false);
       if (
@@ -594,12 +601,7 @@ window.setInterval(() => {
       }
       return;
     }
-    syncRowHumanMode(
-      row.dataset.channel,
-      row.dataset.session,
-      true,
-      remaining,
-    );
+    syncRowHumanMode(row.dataset.channel, row.dataset.session, true, remaining);
   });
   if (activeHumanMode && activeHumanModeRemaining != null) {
     activeHumanModeRemaining = Math.max(0, activeHumanModeRemaining - 1);

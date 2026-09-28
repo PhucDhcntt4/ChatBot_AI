@@ -24,18 +24,21 @@ from app.config import (
     RAG_SERVICE_URL,
     RAG_SERVICE_API_KEY,
     RAG_SERVICE_TIMEOUT_SECONDS,
+    RAG_SEARCH_DOC_TYPE_ID,
+    RAG_SEARCH_GROUP_IDS
 )
 from app.conversation.context import conversation_context_store
 from app.conversation.executor import ConversationExecutor
 from app.conversation.image_service import ProductImageConversationService
 from app.conversation.models import ChatRequest, ConversationResponse, ResetRequest
 from app.conversation.service import ConversationService
-from app.database.product_repository import ProductRepository
+from app.database.product_repository_factory import create_product_repository
 from app.logging_config import log_bot_response, setup_logging
 from app.middleware import AdminAuthMiddleware
 from app.routes.admin_auth_router import router as admin_auth_router
 from app.routes.admin_user_router import router as admin_user_router
 from app.routes.admin_environment_router import router as admin_environment_router
+from app.routes.admin_system_log_router import router as admin_system_log_router
 from app.routes.admin_product_router import router as admin_product_router
 from app.routes.admin_knowledge_router import router as admin_knowledge_router
 from app.routes.admin_prompt_router import router as admin_prompt_router
@@ -76,8 +79,10 @@ def create_knowledge_search():
         )
 
     logger.info(
-        "RAG backend=remote configured timeout=%.1fs",
+        "RAG backend=remote timeout=%.1fs doc_type_id=%s group_ids=%s",
         RAG_SERVICE_TIMEOUT_SECONDS,
+        RAG_SEARCH_DOC_TYPE_ID or None,
+        list(RAG_SEARCH_GROUP_IDS),
     )
 
     def search(question, *, categories=None):
@@ -89,6 +94,12 @@ def create_knowledge_search():
                 base_url=RAG_SERVICE_URL,
                 api_key=RAG_SERVICE_API_KEY,
                 timeout=RAG_SERVICE_TIMEOUT_SECONDS,
+                doc_type_id=(
+                    RAG_SEARCH_DOC_TYPE_ID
+                    if RAG_SEARCH_DOC_TYPE_ID > 0 
+                    else None
+                ),
+                group_ids=RAG_SEARCH_GROUP_IDS
             )
 
             result = remote.search(
@@ -131,32 +142,47 @@ def create_knowledge_search():
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
+    startup_started = perf_counter()
+    step_started = startup_started
+    startup_times: dict[str, float] = {}
     # Configure rotating application logs only when the real ASGI lifespan
     # starts. Importing app.main in unit tests must not pollute production logs.
     setup_logging(service_name="app")
     admin_auth_service.validate()
+    startup_times["logging_auth"] = perf_counter() - step_started
     logger.info(
         "Admin authentication enabled=%s cookie_secure=%s",
         admin_auth_service.enabled,
         admin_auth_service.cookie_secure,
     )
+    step_started = perf_counter()
+    product_repository = create_product_repository()
+    startup_times["catalog"] = perf_counter() - step_started
+    logger.info("CATALOG READY backend=%s", product_repository.provider)
+    step_started = perf_counter()
     ai = create_ai_provider()
     executor = ConversationExecutor(
-        products=ProductRepository(),
+        products=product_repository,
         knowledge_search=create_knowledge_search(),
     )
+    startup_times["ai_executor"] = perf_counter() - step_started
+    step_started = perf_counter()
     sheets_service = SheetsService()
     sheets_service.validate()
+    startup_times["sheets"] = perf_counter() - step_started
     conversation_service = ConversationService(
         ai,
         executor,
         sheets_service=sheets_service,
     )
+    step_started = perf_counter()
     image_conversation_service = ProductImageConversationService(
         ai=ai,
         context_store=conversation_context_store,
         repository=executor.products,
     )
+    startup_times["image_service"] = perf_counter() - step_started
+    step_started = perf_counter()
     human_mode_service = HumanModeService()
     conversation_history_service = ConversationHistoryService()
     app.state.conversation_service = conversation_service
@@ -172,6 +198,7 @@ async def lifespan(app: FastAPI):
         human_mode_service=human_mode_service,
     )
     app.state.channel_providers = create_channel_providers()
+    startup_times["services_channels"] = perf_counter() - step_started
     if TELEGRAM_CHAT_CHANNEL in app.state.channel_providers:
         logger.info(
             "Telegram ready channel=%s webhook=/api/telegram/webhook",
@@ -184,6 +211,17 @@ async def lifespan(app: FastAPI):
         )
     logger.info("Conversation V2 ready provider=%s model=%s", ai.provider_name, ai.model)
     logger.info("Google Sheets order export enabled=%s", GOOGLE_SHEETS_ENABLED)
+    logger.info(
+        "APPLICATION STARTUP READY total=%.3fs logging_auth=%.3fs catalog=%.3fs "
+        "ai_executor=%.3fs sheets=%.3fs image_service=%.3fs services_channels=%.3fs",
+        perf_counter() - startup_started,
+        startup_times["logging_auth"],
+        startup_times["catalog"],
+        startup_times["ai_executor"],
+        startup_times["sheets"],
+        startup_times["image_service"],
+        startup_times["services_channels"],
+    )
     yield
 
 
@@ -199,6 +237,7 @@ app.add_middleware(AdminAuthMiddleware, auth_service=admin_auth_service)
 app.include_router(admin_auth_router)
 app.include_router(admin_user_router)
 app.include_router(admin_environment_router)
+app.include_router(admin_system_log_router)
 app.include_router(admin_product_router)
 app.include_router(admin_knowledge_router)
 app.include_router(admin_prompt_router)
@@ -218,8 +257,15 @@ def health(request: Request):
     service = getattr(request.app.state, "conversation_service", None)
     database = None
     database_error = None
+    catalog_provider = None
     try:
-        database = ProductRepository().health()
+        repository = (
+            service.executor.products
+            if service is not None
+            else create_product_repository()
+        )
+        catalog_provider = repository.provider
+        database = repository.health()
     except Exception as error:
         database_error = str(error)
     return {
@@ -229,6 +275,7 @@ def health(request: Request):
         "ai_model": service.ai.model if service else None,
         "database": database,
         "database_error": database_error,
+        "catalog_provider": catalog_provider,
         "rag_enabled": RAG_ENABLED,
         "google_sheets_enabled": GOOGLE_SHEETS_ENABLED,
         "channels": {

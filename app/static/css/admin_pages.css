@@ -1470,17 +1470,25 @@ td.num {
   width: 17px;
   height: 17px;
   display: block;
-  color: #fff;
   stroke: currentColor;
 }
-.row-clear-cache.icon-only.is-empty,
-.row-clear-cache.icon-only:disabled {
-  color: #a98f94;
-  background: #eadfe1;
-  border-color: #e1d2d5;
+.conversation-table .row-clear-cache.icon-only {
+  color: #b42318;
+  background: #fff;
+  border: 1px solid #e8c9c5;
   box-shadow: none;
-  cursor: not-allowed;
-  opacity: 0.72;
+  opacity: 1;
+}
+.conversation-table .row-clear-cache.icon-only:hover:not(:disabled),
+.conversation-table .row-clear-cache.icon-only:focus-visible {
+  color: #fff;
+  background: #b42318;
+  border-color: #b42318;
+}
+.row-clear-cache-placeholder {
+  width: 38px;
+  height: 38px;
+  flex: none;
 }
 .conversation-pagination button {
   padding: 8px 15px;

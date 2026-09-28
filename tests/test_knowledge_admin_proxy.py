@@ -36,14 +36,59 @@ class ProxyTests(unittest.TestCase):
     def test_list_and_detail_keep_old_ui_contract(self):
         def handler(request):
             self.assertEqual(request.headers["Authorization"], "Bearer server-admin-key")
+            if request.url.path.endswith("documents"):
+                self.assertEqual(request.url.params["doc_type_id"], "1")
             return httpx.Response(200, json={"documents": [DOCUMENT]} if request.url.path.endswith("documents") else DOCUMENT)
         self.remote(handler)
         result = self.client.get("/admin/knowledge/api/documents").json()
         self.assertEqual(result["total"], 1)
+        self.assertEqual(result["documents"][0]["id"], "1")
         self.assertNotIn("file_storage_key", result["documents"][0])
         detail = self.client.get("/admin/knowledge/api/documents/1").json()
         self.assertEqual(detail["content"], DOCUMENT["source_text"])
         self.assertNotIn("file_storage_key", detail)
+
+    def test_qdrant_64_bit_document_id_stays_an_exact_string(self):
+        identifier = "4221233152686565400"
+
+        def handler(request):
+            document = {**DOCUMENT, "id": identifier}
+            return httpx.Response(
+                200,
+                json={"documents": [document]}
+                if request.url.path.endswith("documents") else document,
+            )
+
+        self.remote(handler)
+        listed = self.client.get("/admin/knowledge/api/documents").json()
+        self.assertEqual(listed["documents"][0]["id"], identifier)
+        detail = self.client.get(
+            f"/admin/knowledge/api/documents/{identifier}"
+        ).json()
+        self.assertEqual(detail["id"], identifier)
+
+    def test_exact_source_key_lookup_is_forwarded(self):
+        requests = []
+
+        def handler(request):
+            requests.append(request)
+            return httpx.Response(200, json={
+                **DOCUMENT,
+                "id": "2651988400946607363",
+                "source_key": "shipping/order-policy",
+            })
+
+        service = self.remote(handler)
+        document = service.detail_by_source_key("shipping/order-policy")
+        self.assertEqual(document["source_key"], "shipping/order-policy")
+        self.assertEqual(
+            requests[0].url.path,
+            "/api/v1/documents/by-source-key",
+        )
+        self.assertEqual(
+            requests[0].url.params["source_key"],
+            "shipping/order-policy",
+        )
 
     def test_all_service_pages_are_loaded(self):
         offsets = []
@@ -56,33 +101,69 @@ class ProxyTests(unittest.TestCase):
         self.assertEqual(service.documents()["total"], 201)
         self.assertEqual(offsets, [0, 200])
 
-    def test_upload_is_remote_and_waits_for_completion(self):
-        def handler(request):
-            self.assertEqual(request.method, "POST")
-            self.assertEqual(request.url.path, "/api/v1/documents/upload")
-            self.assertIn(b'name="source_key"', request.content)
-            self.assertIn(b"bot_upload/", request.content)
-            self.assertIn(b"store", request.content)
-            self.assertIn(b"file-content", request.content)
-            return httpx.Response(200, json=DOCUMENT)
-        self.remote(handler)
-        response = self.client.post("/admin/knowledge/api/upload", data={"category": "Store"},
-                                    files={"file": ("sample.txt", b"file-content", "text/plain")})
-        self.assertEqual(response.status_code, 200)
-        self.assertTrue(response.json()["success"])
-        self.assertNotIn("job", response.json())
-
-    def test_delete_only_calls_service_and_filters_private_fields(self):
+    def test_document_scope_is_forwarded_on_every_page(self):
         requests = []
+
         def handler(request):
             requests.append(request)
-            return httpx.Response(200, json={"deleted": True, "id": 1, "file_storage_key": "private"})
+            offset = int(request.url.params["offset"])
+            batch = [
+                {**DOCUMENT, "id": index + 1}
+                for index in range(200)
+            ] if offset == 0 else []
+            return httpx.Response(200, json={"documents": batch})
+
+        service = self.remote(handler)
+        service.documents(doc_type_id=1)
+
+        self.assertEqual(len(requests), 2)
+        self.assertTrue(all(
+            request.url.params["doc_type_id"] == "1"
+            for request in requests
+        ))
+
+    def test_category_lookup_returns_full_active_documents(self):
+        requests = []
+        shipping = {
+            **DOCUMENT,
+            "id": 7,
+            "category": "shipping",
+            "title": "Shipping",
+        }
+        inactive = {**shipping, "id": 8, "is_active": False}
+
+        def handler(request):
+            requests.append(request)
+            if request.url.path == "/api/v1/documents":
+                return httpx.Response(200, json={
+                    "documents": [shipping, inactive, DOCUMENT],
+                })
+            self.assertEqual(request.url.path, "/api/v1/documents/7")
+            return httpx.Response(200, json={
+                **shipping,
+                "source_text": "Full shipping policy",
+            })
+
+        service = self.remote(handler)
+        documents = service.details_by_category("shipping")
+
+        self.assertEqual(len(documents), 1)
+        self.assertEqual(documents[0]["id"], "7")
+        self.assertEqual(documents[0]["content"], "Full shipping policy")
+        self.assertEqual(len(requests), 2)
+
+    def test_mutation_routes_are_not_exposed(self):
+        handler = Mock()
         self.remote(handler)
-        response = self.client.delete("/admin/knowledge/api/documents/1")
-        self.assertEqual(response.status_code, 200)
-        self.assertEqual(len(requests), 1)
-        self.assertEqual(requests[0].method, "DELETE")
-        self.assertNotIn("private", response.text)
+        self.assertEqual(
+            self.client.post("/admin/knowledge/api/upload").status_code,
+            404,
+        )
+        self.assertEqual(
+            self.client.delete("/admin/knowledge/api/documents/1").status_code,
+            405,
+        )
+        handler.assert_not_called()
 
     def test_upstream_errors_are_sanitized(self):
         for upstream, expected in ((401, 503), (403, 503), (404, 404), (429, 429), (503, 503)):
@@ -92,37 +173,13 @@ class ProxyTests(unittest.TestCase):
                 self.assertEqual(response.status_code, expected)
                 self.assertNotIn("sensitive-upstream-data", response.text)
 
-    def test_timeout_does_not_retry_mutation(self):
-        handler = Mock(side_effect=httpx.ReadTimeout("secret URL"))
-        self.remote(handler)
-        response = self.client.delete("/admin/knowledge/api/documents/1")
-        self.assertEqual(response.status_code, 504)
-        handler.assert_called_once()
-        self.assertNotIn("secret URL", response.text)
-
-    def test_empty_unsupported_and_large_uploads_are_rejected(self):
-        handler = Mock()
-        self.remote(handler)
-        for filename, content, status in (("a.exe", b"abc", 422), ("a.txt", b"", 422), ("a.txt", b"a" * 11, 413)):
-            with self.subTest(filename=filename, length=len(content)), patch("app.routes.admin_knowledge_router.MAX_UPLOAD_BYTES", 10):
-                response = self.client.post("/admin/knowledge/api/upload", files={"file": (filename, content)})
-                self.assertEqual(response.status_code, status)
-        handler.assert_not_called()
-
-    def test_cross_site_write_is_rejected(self):
-        handler = Mock()
-        self.remote(handler)
-        response = self.client.delete("/admin/knowledge/api/documents/1", headers={"Origin": "https://evil.test"})
-        self.assertEqual(response.status_code, 403)
-        handler.assert_not_called()
-
     def test_management_routes_require_login(self):
         admin_auth_service.enabled = True
         handler = Mock()
         self.remote(handler)
         with patch.object(admin_auth_service, "read_session", return_value=None):
-            for method, path in (("GET", "/admin/knowledge/api/documents"), ("DELETE", "/admin/knowledge/api/documents/1"),
-                                 ("POST", "/admin/knowledge/api/upload")):
+            for method, path in (("GET", "/admin/knowledge/api/documents"),
+                                 ("GET", "/admin/knowledge/api/documents/1")):
                 self.assertEqual(self.client.request(method, path).status_code, 401)
         handler.assert_not_called()
 

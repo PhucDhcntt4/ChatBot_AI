@@ -1,7 +1,7 @@
 from pathlib import Path
 
 from app.config import PRODUCT_IMAGE_DIR
-from app.database.connection import database_connection
+from app.database.qdrant_catalog_repository import QdrantCatalogRepository
 
 
 class ProductImageStore:
@@ -21,32 +21,18 @@ class ProductImageStore:
             return cached
 
         try:
-            with database_connection() as connection:
-                row = connection.execute(
-                    """
-                    SELECT local_path, mime_type
-                    FROM product_images
-                    WHERE source_url = %s
-                      AND is_active = TRUE
-                      AND local_path IS NOT NULL
-                      AND local_path <> ''
-                    ORDER BY updated_at DESC, id DESC
-                    LIMIT 1
-                    """,
-                    (source_url,),
-                ).fetchone()
+            records = QdrantCatalogRepository().image_records()
         except Exception:
             return None
 
-        if not row:
-            return None
-
-        metadata = {
-            "local_path": str(row["local_path"]),
-            "mime_type": str(row["mime_type"] or "image/jpeg"),
-        }
-        self._metadata_cache[source_url] = metadata
-        return metadata
+        for row in records:
+            url = str(row.get("source_url") or "")
+            if url and url not in self._metadata_cache:
+                self._metadata_cache[url] = {
+                    "local_path": str(row["local_path"]),
+                    "mime_type": str(row.get("mime_type") or "image/jpeg"),
+                }
+        return self._metadata_cache.get(source_url)
 
     def get(
         self,

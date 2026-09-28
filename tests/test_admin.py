@@ -1,10 +1,10 @@
-import io
+import tempfile
 import unittest
+from pathlib import Path
 from types import SimpleNamespace
-from unittest.mock import Mock, patch
+from unittest.mock import MagicMock, Mock, patch
 
 from fastapi.testclient import TestClient
-from openpyxl import Workbook
 
 from app.main import app
 from app.services.admin_auth_service import admin_auth_service
@@ -13,7 +13,7 @@ from app.routes.admin_conversation_router import (
     clear_session_cache,
     session_detail,
 )
-from app.routes.admin_product_router import _read_excel_skus
+from app.routes.admin_product_router import recognition_image_content
 
 
 class AdminTests(unittest.TestCase):
@@ -28,11 +28,11 @@ class AdminTests(unittest.TestCase):
     def test_admin_page_is_utf8(self):
         response = self.client.get("/admin/products")
         self.assertEqual(response.status_code, 200)
-        self.assertIn("Đồng bộ danh mục sản phẩm", response.text)
-        self.assertIn("/static/js/product_admin.js", response.text)
+        self.assertIn("Kho sản phẩm", response.text)
+        self.assertIn("/static/js/product_catalog_admin.js", response.text)
 
-    def test_original_admin_ui_uses_v2_chat_backend(self):
-        response = self.client.get("/static/js/product_admin.js")
+    def test_admin_ui_uses_v2_chat_backend(self):
+        response = self.client.get("/static/js/admin_base.js")
         self.assertEqual(response.status_code, 200)
         self.assertIn('fetch("/api/chat"', response.text)
         self.assertIn('fetch("/api/chat/image"', response.text)
@@ -40,14 +40,11 @@ class AdminTests(unittest.TestCase):
 
     def test_admin_chat_can_start_a_new_conversation(self):
         page = self.client.get("/admin/products")
-        script = self.client.get("/static/js/product_admin.js")
+        script = self.client.get("/static/js/admin_base.js")
         self.assertIn('id="chatReset"', page.text)
         self.assertIn('fetch("/api/chat/reset"', script.text)
         self.assertIn("crypto.randomUUID()", script.text)
-        self.assertIn(
-            '<div class="ck-msg bot">👋 Xin chào anh/chị!',
-            page.text,
-        )
+        self.assertIn('id="chatBody"', page.text)
 
     def test_old_admin_chat_routes_do_not_exist(self):
         self.assertEqual(
@@ -61,19 +58,18 @@ class AdminTests(unittest.TestCase):
 
     def test_catalog_rows_can_open_product_details(self):
         page = self.client.get("/admin/products")
-        script = self.client.get("/static/js/product_admin.js")
+        script = self.client.get("/static/js/product_catalog_admin.js")
         self.assertIn('id="productDetailModal"', page.text)
         self.assertIn('id="productDetailBody"', page.text)
         self.assertIn("openProductDetail", script.text)
         self.assertIn("/admin/products/api/catalog/", script.text)
-        self.assertIn("catalog-ai-select", script.text)
-        self.assertIn("/cancel", script.text)
-        self.assertIn('id="syncAllButton"', page.text)
-        self.assertIn("/admin/products/api/sync-all", script.text)
-        self.assertIn('id="syncAllConfirmModal"', page.text)
-        self.assertIn("/admin/products/api/sync-all/preview", script.text)
+        self.assertNotIn('id="syncAllButton"', page.text)
+        self.assertNotIn("/admin/products/api/sync-all", script.text)
         self.assertIn('id="catalogType"', page.text)
-        self.assertIn("product_type=", script.text)
+        self.assertIn("product_type: productType", script.text)
+        self.assertIn("Ảnh marketing nhận diện", script.text)
+        self.assertIn('id="recognitionImageForm"', script.text)
+        self.assertIn("/recognition-images", script.text)
 
     def test_conversation_admin_page_is_available(self):
         response = self.client.get("/admin/conversations")
@@ -93,38 +89,23 @@ class AdminTests(unittest.TestCase):
             script.text,
         )
 
-    def test_knowledge_page_keeps_existing_ui(self):
+    def test_knowledge_page_is_read_only(self):
         response = self.client.get("/admin/knowledge", follow_redirects=False)
         self.assertEqual(response.status_code, 200)
         self.assertNotIn("location", response.headers)
-        for element in ('id="uploadForm"', 'id="knowledgeCategory"', 'id="documentRows"', 'id="docModal"'):
+        for element in ('id="documentRows"', 'id="docModal"', 'id="refreshDocuments"'):
             self.assertIn(element, response.text)
-        self.assertIn("20260907-rag-categories2", response.text)
+        self.assertNotIn('id="uploadForm"', response.text)
+        self.assertNotIn('id="docModalDelete"', response.text)
+        self.assertIn("20260918-readonly1", response.text)
 
-    def test_knowledge_categories_match_rag_service_labels_and_order(self):
-        import re
-
-        page = self.client.get("/admin/knowledge").text
-        select = re.search(r'<select id="knowledgeCategory" required>(.*?)</select>', page, re.S).group(1)
-        self.assertEqual(re.findall(r'<option value="([^"]+)">([^<]+)</option>', select), [
-            ("store", "Cửa hàng"),
-            ("size_guide", "Hướng dẫn chọn size"),
-            ("warranty", "Bảo hành"),
-            ("returns", "Đổi trả"),
-            ("shipping", "Giao hàng"),
-            ("promotion", "Khuyến mãi"),
-            ("customer_care", "Chăm sóc khách hàng"),
-            ("custom", "Nhóm khác…"),
-        ])
-
-    def test_knowledge_script_uses_bot_api_without_job_polling(self):
+    def test_knowledge_script_only_uses_read_apis(self):
         script = self.client.get("/static/js/knowledge_admin.js")
         self.assertEqual(script.status_code, 200)
-        self.assertIn('fetch("/admin/knowledge/api/upload"', script.text)
-        self.assertIn("clearSelectedFile();", script.text)
-        self.assertIn("window.confirm(", script.text)
-        self.assertNotIn("watchJob", script.text)
-        self.assertNotIn("/api/jobs/", script.text)
+        self.assertIn('fetch("/admin/knowledge/api/documents")', script.text)
+        self.assertNotIn("/api/upload", script.text)
+        self.assertNotIn('method: "DELETE"', script.text)
+        self.assertNotIn("window.confirm(", script.text)
         self.assertNotIn("Authorization", script.text)
         self.assertNotIn("API_KEY", script.text)
 
@@ -265,15 +246,29 @@ class AdminTests(unittest.TestCase):
         self.assertEqual(result["last_message"], "Tin moi nhat")
         self.assertEqual(result["context"]["history"][-1]["text"], "Tin moi nhat")
 
-    def test_excel_accepts_vietnamese_product_code_header(self):
-        workbook = Workbook()
-        sheet = workbook.active
-        sheet.append(["Mã sản phẩm"])
-        sheet.append(["FE04"])
-        sheet.append(["G81V6"])
-        content = io.BytesIO()
-        workbook.save(content)
-        self.assertEqual(_read_excel_skus(content.getvalue()), ["FE04", "G81V6"])
+    def test_recognition_image_content_reads_from_product_image_directory(self):
+        repository = Mock()
+        repository.payload_by_id.return_value = {
+            "source_kind": "recognition",
+            "is_active": True,
+            "local_path": "recognition/test.jpg",
+            "mime_type": "image/jpeg",
+        }
+        with tempfile.TemporaryDirectory() as directory:
+            image_path = Path(directory) / "recognition" / "test.jpg"
+            image_path.parent.mkdir()
+            image_path.write_bytes(b"test-image")
+            with patch(
+                "app.routes.admin_product_router.QdrantImageRepository",
+                return_value=repository,
+            ), patch(
+                "app.routes.admin_product_router.PRODUCT_IMAGE_DIR", Path(directory)
+            ):
+                response = recognition_image_content("image-id")
+
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.body, b"test-image")
+        self.assertEqual(response.media_type, "image/jpeg")
 
 
 if __name__ == "__main__":

@@ -3,10 +3,11 @@ import re
 from typing import Any
 import unicodedata
 
-from app.database.connection import database_connection
-
-
 class ProductRepository:
+    """Backend-independent catalog formatting and search behavior."""
+
+    provider = "abstract"
+
     @classmethod
     def _feature_present(cls, text: Any, feature: str) -> bool:
         """Match one catalog feature while respecting explicit negation."""
@@ -114,30 +115,6 @@ class ProductRepository:
             if unicodedata.category(character) != "Mn"
         ).replace("đ", "d")
 
-    def health(self) -> dict[str, int]:
-        with database_connection() as connection:
-            row = connection.execute(
-                """
-                SELECT (SELECT COUNT(*) FROM products) AS products,
-                       (SELECT COUNT(*) FROM product_variants) AS variants,
-                       (SELECT COUNT(*) FROM product_images) AS images
-                """
-            ).fetchone()
-        return dict(row or {})
-
-    def product_types(self, active_only: bool = True) -> list[str]:
-        status_clause = "AND status = 'ACTIVE'" if active_only else ""
-        with database_connection() as connection:
-            rows = connection.execute(
-                f"""
-                SELECT DISTINCT product_type FROM products
-                WHERE product_type IS NOT NULL AND product_type <> ''
-                {status_clause}
-                ORDER BY product_type
-                """
-            ).fetchall()
-        return [str(row["product_type"]) for row in rows]
-
     @classmethod
     def match_product_type(
         cls,
@@ -183,64 +160,9 @@ class ProductRepository:
         type_name = re.sub(r"\([^)]*\)", " ", product_type)
         return len(cls._normalize(type_name).split()) >= 2
 
-    def reference_products(
-        self,
-        product_type: str | None = None,
-        limit: int = 5,
-        images_per_product: int = 3,
-    ) -> list[dict[str, Any]]:
-        condition = "AND product_type = %s" if product_type else ""
-        parameters: list[Any] = [product_type] if product_type else []
-        parameters.append(limit)
-        with database_connection() as connection:
-            rows = connection.execute(
-                f"""
-                SELECT product_code FROM products
-                WHERE status = 'ACTIVE' {condition}
-                ORDER BY id LIMIT %s
-                """,
-                parameters,
-            ).fetchall()
-        references = []
-        for row in rows:
-            product = self.public_info(str(row["product_code"]))
-            if product and product["image_urls"]:
-                references.append({
-                    "product_code": product["product_code"],
-                    "title": product["product_name"],
-                    "product_type": product["product_type"],
-                    "image_urls": product["image_urls"][:images_per_product],
-                })
-        return references
 
-    def public_info(self, product_code: str) -> dict[str, Any] | None:
-        code = product_code.strip().upper()
-        if not code:
-            return None
-        with database_connection() as connection:
-            product = connection.execute(
-                "SELECT * FROM products WHERE product_code = %s", (code,)
-            ).fetchone()
-            if not product:
-                return None
-            variants = connection.execute(
-                """
-                SELECT color, size, price, inventory_quantity, available
-                FROM product_variants WHERE product_id = %s
-                ORDER BY color, size
-                """,
-                (product["id"],),
-            ).fetchall()
-            images = connection.execute(
-                """
-                SELECT color, source_url, local_path, is_featured
-                FROM product_images
-                WHERE product_id = %s AND is_active = TRUE
-                ORDER BY image_order NULLS LAST, id
-                """,
-                (product["id"],),
-            ).fetchall()
-
+    def _public_info_from_rows(self, code, product, variants, images):
+        """Build a public product response from normalized catalog records."""
         colors: list[str] = []
         sizes: set[str] = set()
         prices: set[int | float] = set()
@@ -307,6 +229,9 @@ class ProductRepository:
             "image_urls_by_color": by_color,
         }
 
+    def _search_rows(self):
+        raise NotImplementedError("Catalog backend must provide search rows.")
+
     def search(
         self,
         query: str,
@@ -344,14 +269,22 @@ class ProductRepository:
             normalized_query_tokens.intersection({"nu", "guoc"})
         )
         wants_men = "nam" in normalized_query_tokens and not wants_women
-        with database_connection() as connection:
-            rows = connection.execute(
-                """
-                SELECT product_code, title, product_type, description, vendor,
-                       material, sole, height, status
-                FROM products ORDER BY id
-                """
-            ).fetchall()
+        required_gender = "nam" if wants_men else None
+        normalized_stopwords = {
+            self._normalize(word) for word in stopwords
+        }
+        # With a gendered request such as "dep nam", matching only "nam"
+        # is not enough: otherwise every men's accessory can enter the
+        # shortlist. Require at least one remaining product term in the
+        # title/type. Men's catalog entries must also explicitly be for men;
+        # women's product titles do not consistently contain the word "nu".
+        requested_identity_terms = {
+            token for token in normalized_query_tokens
+            if token not in normalized_stopwords
+            and token not in {"nam", "nu"}
+            and not token.isdecimal()
+        }
+        rows = self._search_rows()
         exact_codes = [
             str(row["product_code"])
             for row in rows
@@ -382,6 +315,14 @@ class ProductRepository:
             if wants_women and "nam" in identity_tokens:
                 continue
             if wants_men and "nu" in identity_tokens:
+                continue
+            if required_gender and required_gender not in identity_tokens:
+                continue
+            if (
+                (wants_men or wants_women)
+                and requested_identity_terms
+                and not requested_identity_terms.intersection(identity_tokens)
+            ):
                 continue
             if requested_heights:
                 product_heights = self._height_values(row["height"])
@@ -431,24 +372,6 @@ class ProductRepository:
         products = [self.public_info(code) for _, code in ranked[:limit]]
         return [product for product in products if product]
 
-    def recommend_same_type(
-        self,
-        product_type: str,
-        exclude_codes: list[str],
-        limit: int,
-    ) -> list[dict[str, Any]]:
-        with database_connection() as connection:
-            rows = connection.execute(
-                """
-                SELECT product_code FROM products
-                WHERE status = 'ACTIVE' AND product_type = %s
-                  AND NOT (product_code = ANY(%s))
-                ORDER BY random() LIMIT %s
-                """,
-                (product_type, exclude_codes or [""], limit),
-            ).fetchall()
-        products = [self.public_info(str(row["product_code"])) for row in rows]
-        return [product for product in products if product]
 
     def recommend_by_query(
         self,

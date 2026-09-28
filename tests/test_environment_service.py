@@ -65,6 +65,5 @@ class EnvironmentFileServiceTests(unittest.TestCase):
         with self.assertRaises(EnvironmentFileError):
             self.service.update({"CHANNEL_PROVIDER": "web,unknown"})
 
-
 if __name__ == "__main__":
     unittest.main()
