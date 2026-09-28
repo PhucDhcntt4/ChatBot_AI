@@ -165,6 +165,121 @@ cho ứng dụng nếu không cần thiết.
 
 ### 5.4 Redis
 
+Redis được dự án sử dụng cho hai nhóm dữ liệu tạm thời:
+
+- Ngữ cảnh hội thoại, sản phẩm đang chọn và đơn nháp của từng khách.
+- Trạng thái human mode khi nhân viên tiếp quản hội thoại.
+
+Lịch sử tin nhắn lâu dài vẫn nằm trong PostgreSQL. Xóa cache Redis không xóa
+lịch sử PostgreSQL.
+
+#### Cách 1 — chạy Redis bằng Docker (khuyến nghị)
+
+Lần đầu tạo container:
+
+```powershell
+docker run -d `
+  --name donghai-redis `
+  --restart unless-stopped `
+  -p 127.0.0.1:6379:6379 `
+  -v donghai-redis-data:/data `
+  redis:7-alpine `
+  redis-server --appendonly yes
+```
+
+Giải thích:
+
+- `--restart unless-stopped`: Redis tự chạy lại sau khi server khởi động.
+- `127.0.0.1:6379:6379`: chỉ mở Redis trên máy local, không công khai Internet.
+- `donghai-redis-data:/data`: giữ dữ liệu Redis khi tạo lại container.
+- `--appendonly yes`: bật AOF để tăng khả năng phục hồi sau khi Redis dừng đột ngột.
+
+Các lần sau:
+
+```powershell
+docker start donghai-redis
+```
+
+Kiểm tra:
+
+```powershell
+docker exec donghai-redis redis-cli ping
+```
+
+Kết quả đúng:
+
+```text
+PONG
+```
+
+Xem trạng thái container:
+
+```powershell
+docker ps --filter "name=donghai-redis"
+docker logs --tail 100 donghai-redis
+```
+
+Không chạy lại lệnh `docker run` nếu container `donghai-redis` đã tồn tại.
+
+Nếu muốn đặt mật khẩu cho Redis Docker, tạo file `secrets/redis.conf` trên
+server (không commit lên Git):
+
+```conf
+bind 0.0.0.0
+protected-mode yes
+appendonly yes
+requirepass THAY_BANG_MAT_KHAU_MANH
+```
+
+Sau đó tạo container bằng file cấu hình này:
+
+```powershell
+docker run -d `
+  --name donghai-redis `
+  --restart unless-stopped `
+  -p 127.0.0.1:6379:6379 `
+  -v donghai-redis-data:/data `
+  -v "${PWD}/secrets/redis.conf:/usr/local/etc/redis/redis.conf:ro" `
+  redis:7-alpine `
+  redis-server /usr/local/etc/redis/redis.conf
+```
+
+Kiểm tra Redis có mật khẩu mà không ghi mật khẩu trực tiếp trong câu lệnh:
+
+```powershell
+$env:REDISCLI_AUTH = Read-Host "Redis password"
+docker exec -e REDISCLI_AUTH=$env:REDISCLI_AUTH donghai-redis redis-cli ping
+Remove-Item Env:REDISCLI_AUTH
+```
+
+#### Cách 2 — cài Redis trực tiếp trên Linux
+
+```bash
+sudo apt update
+sudo apt install -y redis-server
+sudo systemctl enable --now redis-server
+sudo systemctl status redis-server
+redis-cli ping
+```
+
+Trong `/etc/redis/redis.conf`, production nên giữ Redis ở mạng nội bộ:
+
+```conf
+bind 127.0.0.1 ::1
+protected-mode yes
+appendonly yes
+# Bỏ dấu # và thay giá trị nếu cần mật khẩu:
+# requirepass THAY_BANG_MAT_KHAU_MANH
+```
+
+Sau khi sửa cấu hình:
+
+```bash
+sudo systemctl restart redis-server
+```
+
+#### Cấu hình Redis trong `.env`
+
 ```env
 REDIS_URL=redis://127.0.0.1:6379/0
 REDIS_SOCKET_TIMEOUT_SECONDS=15
@@ -173,12 +288,141 @@ REDIS_CONVERSATION_PREFIX=donghai:conversation
 REDIS_CONVERSATION_TTL_SECONDS=604800
 ```
 
-- `604800` giây tương đương 7 ngày.
-- Nếu Redis có mật khẩu:
+Ý nghĩa từng biến:
+
+| Biến | Ý nghĩa |
+|---|---|
+| `REDIS_URL` | Địa chỉ Redis; `/0` là database logic số 0 |
+| `REDIS_SOCKET_TIMEOUT_SECONDS` | Thời gian tối đa chờ Redis phản hồi |
+| `REDIS_CONVERSATION_ENABLED` | `true` lưu context vào Redis; `false` chỉ giữ trong RAM |
+| `REDIS_CONVERSATION_PREFIX` | Prefix phân biệt key của ứng dụng |
+| `REDIS_CONVERSATION_TTL_SECONDS` | Thời gian sống của context sau lần tương tác gần nhất |
+
+Các giá trị TTL thường dùng:
+
+| Thời gian | Số giây |
+|---|---:|
+| 10 phút | `600` |
+| 1 giờ | `3600` |
+| 1 ngày | `86400` |
+| 7 ngày | `604800` |
+
+Thiết lập hiện tại `604800` nghĩa là cache hội thoại hết hạn sau 7 ngày không
+có tương tác. Khi khách nhắn tiếp, TTL được gia hạn lại.
+
+Nếu Redis có mật khẩu:
 
 ```env
 REDIS_URL=redis://:MAT_KHAU@127.0.0.1:6379/0
 ```
+
+Nếu username ACL là `donghai`:
+
+```env
+REDIS_URL=redis://donghai:MAT_KHAU@127.0.0.1:6379/0
+```
+
+Nếu mật khẩu có ký tự đặc biệt như `@`, `:`, `/`, `#` hoặc `%`, phải URL encode
+mật khẩu trước khi đặt vào `REDIS_URL`.
+
+#### Human mode dùng cùng Redis
+
+```env
+HUMAN_MODE_ENABLED=true
+HUMAN_MODE_TTL_SECONDS=600
+```
+
+- `HUMAN_MODE_ENABLED=true`: cho phép tạm dừng bot khi nhân viên tiếp quản.
+- `HUMAN_MODE_TTL_SECONDS=600`: bot tự bật lại sau 10 phút nếu không gia hạn.
+- Thời gian được chọn trên trang Hội thoại được lưu vào Redis.
+
+Nếu `REDIS_CONVERSATION_ENABLED=false`, context hội thoại chuyển sang RAM nhưng
+human mode vẫn cần Redis khi `HUMAN_MODE_ENABLED=true`. Muốn chạy hoàn toàn
+không Redis phải đặt cả hai biến thành `false`:
+
+```env
+REDIS_CONVERSATION_ENABLED=false
+HUMAN_MODE_ENABLED=false
+```
+
+Chế độ RAM chỉ phù hợp development với một process. Khởi động lại ứng dụng sẽ
+làm mất context và đơn nháp đang xử lý.
+
+#### Các key Redis của dự án
+
+```text
+donghai:conversation:{channel}:{session_id}
+donghai:human_mode:{channel}:{session_id}
+donghai:human_mode:settings:default_ttl_seconds
+```
+
+Ví dụ:
+
+```text
+donghai:conversation:facebook:27426462903677861
+donghai:human_mode:facebook:27426462903677861
+```
+
+Không dùng lệnh `KEYS *` trên production có nhiều dữ liệu. Dùng `SCAN`:
+
+```powershell
+redis-cli --scan --pattern "donghai:*"
+```
+
+Kiểm tra TTL của một session:
+
+```powershell
+redis-cli TTL "donghai:conversation:web:SESSION_ID"
+```
+
+Kết quả TTL:
+
+- Số dương: số giây còn lại.
+- `-1`: key không có thời hạn.
+- `-2`: key không tồn tại.
+
+#### Kiểm tra từ chính môi trường Python của dự án
+
+```powershell
+python -c "from app.database.redis_connection import check_redis_connection; print(check_redis_connection())"
+```
+
+Kết quả đúng:
+
+```text
+True
+```
+
+Nếu trả về `False`, kiểm tra lần lượt:
+
+1. Redis/container đã chạy chưa.
+2. Host, cổng và database trong `REDIS_URL` có đúng không.
+3. Mật khẩu Redis có đúng và đã URL encode chưa.
+4. Firewall có chặn kết nối không.
+5. Bot và Redis có nằm đúng Docker network không.
+
+#### Xóa cache hội thoại
+
+Cách an toàn nhất là dùng nút **Xóa cache** trên trang Hội thoại. Hệ thống sẽ:
+
+1. Lưu snapshot cần thiết vào PostgreSQL.
+2. Xóa context Redis của đúng channel/session.
+3. Giữ nguyên toàn bộ lịch sử hội thoại PostgreSQL.
+4. Tắt human mode của session đó nếu đang bật.
+
+Không dùng `FLUSHALL` hoặc `FLUSHDB` trên production vì có thể xóa cache của
+các ứng dụng khác dùng chung Redis.
+
+#### Lưu ý bảo mật và production
+
+- Không mở cổng `6379` trực tiếp ra Internet.
+- Chỉ cho bot kết nối Redis qua localhost, private network hoặc Docker network.
+- Dùng mật khẩu/ACL nếu Redis không nằm riêng trên cùng máy.
+- Không ghi `REDIS_URL` có mật khẩu vào log hoặc commit lên Git.
+- Khởi động Redis trước Bot Conversation.
+- Khi Redis ngừng hoạt động trong lúc context Redis được bật, quá trình xử lý
+  hội thoại có thể lỗi; cần giám sát và tự khởi động lại Redis.
+- PostgreSQL vẫn là nơi lưu lịch sử chính; Redis chỉ giữ trạng thái đang chạy.
 
 ### 5.5 Qdrant catalog và vector ảnh
 
